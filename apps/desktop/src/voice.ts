@@ -119,11 +119,7 @@ export function createVoice(): Voice {
     isEnabled: () => enabled,
     setListenLang(lang) {
       listenLang = lang;
-      if (ambient && ambientOpts) {
-        ambientOpts = { ...ambientOpts, lang };
-        this.stopAmbient();
-        this.startAmbient(ambientOpts);
-      }
+      if (ambientOpts) ambientOpts = { ...ambientOpts, lang };
     },
     speak(text) {
       if (!enabled || !tts || !text.trim()) return Promise.resolve();

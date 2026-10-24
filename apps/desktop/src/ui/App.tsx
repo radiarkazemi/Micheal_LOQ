@@ -8,6 +8,17 @@ import "./styles.css";
 const TIMEFRAMES = ["1", "5", "15", "60", "240", "D"] as const;
 const PERSIAN_RE = /[\u0600-\u06FF]/;
 
+const EMPTY_STATE = {
+  connected: false,
+  status: "offline",
+  session: null,
+  messages: [] as const,
+  speaking: false,
+  listening: false,
+  voiceEnabled: true,
+  live: false,
+};
+
 function hasPersian(text: string): boolean {
   return PERSIAN_RE.test(text);
 }
@@ -37,28 +48,8 @@ export function App() {
 
   const state = useSyncExternalStore(
     (cb) => (cloud ? cloud.subscribe(cb) : () => undefined),
-    () =>
-      cloud?.getState() ?? {
-        connected: false,
-        status: "offline",
-        session: null,
-        messages: [],
-        speaking: false,
-        listening: false,
-        voiceEnabled: true,
-        live: false,
-      },
-    () =>
-      cloud?.getState() ?? {
-        connected: false,
-        status: "offline",
-        session: null,
-        messages: [],
-        speaking: false,
-        listening: false,
-        voiceEnabled: true,
-        live: false,
-      },
+    () => cloud?.getState() ?? EMPTY_STATE,
+    () => EMPTY_STATE,
   );
 
   const [draft, setDraft] = useState("");
