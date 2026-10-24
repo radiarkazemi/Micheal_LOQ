@@ -1,0 +1,19 @@
+{
+  "name": "micheal",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Micheal — Jarvis-like trading companion (PC desktop + Germany cloud brain)",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:desktop": "pnpm --filter @micheal/desktop dev",
+    "dev:server": "pnpm --filter @micheal/server dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "start:server": "pnpm --filter @micheal/server start"
+  },
+  "license": "MIT"
+}

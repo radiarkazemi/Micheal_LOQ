@@ -1,0 +1,9 @@
+{
+  "name": "micheal-cloud-release",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@micheal/protocol": "file:./protocol",
+    "ws": "^8.18.3"
+  }
+}
