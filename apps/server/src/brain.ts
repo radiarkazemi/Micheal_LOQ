@@ -105,8 +105,8 @@ function heuristicThink(session: SessionState, utterance: string | undefined, la
       speak: true,
       lang,
       text: fa
-        ? `خوش اومدی. میشل آنلاینه — مغز روی سرور آلمان، حضور روی میز کارت. الان روی ${session.symbol} تایم‌فریم ${session.timeframe} هستیم. از کجا شروع کنیم؟`
-        : `Good to see you. Micheal online — cloud brain in Germany, presence on your desk. We're on ${session.symbol} ${session.timeframe}. How shall we proceed?`,
+        ? `میشل آنلاینه. دارم همه‌چیز رو می‌بینم و می‌شنوم — ${session.symbol} تایم‌فریم ${session.timeframe}. لازم نیست چیزی تایپ کنی؛ حرف بزن یا فقط معامله کن، من مراقبم.`
+        : `Micheal online. I'm already watching and listening — ${session.symbol} ${session.timeframe}. No need to type; speak or just trade. I've got eyes on.`,
     };
   }
 

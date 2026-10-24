@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import type { SessionState } from "@micheal/protocol";
 import { MichealCloud } from "@/cloud";
-import { readConfig, saveToken } from "@/config";
+import { loadConfig } from "@/config";
 import { createVoice } from "@/voice";
 import "./styles.css";
 
@@ -14,19 +14,26 @@ function hasPersian(text: string): boolean {
 
 export function App() {
   const voice = useMemo(() => createVoice(), []);
-  const initial = useMemo(() => readConfig(), []);
-  const [tokenDraft, setTokenDraft] = useState(initial.token === "dev-token-change-me" ? "" : initial.token);
-  const [tokenReady, setTokenReady] = useState(
-    Boolean(initial.token && initial.token !== "dev-token-change-me"),
-  );
+  const [cfg, setCfg] = useState<{ url: string; token: string } | null>(null);
   const [uiLang, setUiLang] = useState<"en" | "fa">("fa");
-  const [cloudUrl] = useState(initial.url);
+  const [ambientOn, setAmbientOn] = useState(true);
+  const [ears, setEars] = useState(false);
+  const [heard, setHeard] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadConfig().then((c) => {
+      if (!cancelled) setCfg(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const cloud = useMemo(() => {
-    if (!tokenReady) return null;
-    const cfg = readConfig();
+    if (!cfg?.token) return null;
     return new MichealCloud(cfg.url, cfg.token, (text) => voice.speak(text));
-  }, [voice, tokenReady]);
+  }, [voice, cfg]);
 
   const state = useSyncExternalStore(
     (cb) => (cloud ? cloud.subscribe(cb) : () => undefined),
@@ -71,34 +78,58 @@ export function App() {
     return () => cloud.disconnect();
   }, [cloud]);
 
+  // Always-on ears — no click required (Jarvis listens)
+  useEffect(() => {
+    if (!cloud || !ambientOn || !voice.supported.stt || !state.connected) {
+      voice.stopAmbient();
+      setEars(false);
+      return;
+    }
+    voice.startAmbient({
+      lang: uiLang,
+      onListening: setEars,
+      onPartial: setHeard,
+      onPhrase: (text) => {
+        setHeard("");
+        if (hasPersian(text)) setUiLang("fa");
+        cloud.chat(text);
+      },
+    });
+    return () => voice.stopAmbient();
+  }, [cloud, ambientOn, voice, uiLang, state.connected]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.messages]);
 
-  const orbClass = ["orb", state.speaking ? "speaking" : "", state.listening ? "listening" : ""]
+  const orbClass = [
+    "orb",
+    state.speaking ? "speaking" : "",
+    state.listening || ears ? "listening" : "",
+  ]
     .filter(Boolean)
     .join(" ");
 
-  const caption = state.listening
+  const caption = state.speaking
     ? fa
-      ? "در حال شنیدن…"
-      : "Listening…"
-    : state.speaking
+      ? "در حال صحبت…"
+      : "Speaking…"
+    : ears || state.listening
       ? fa
-        ? "در حال صحبت…"
-        : "Speaking…"
+        ? "دارم می‌شنوم و می‌فهمم…"
+        : "Hearing & understanding…"
       : !state.connected
         ? fa
           ? "اتصال به مغز ابری…"
           : "Linking to cloud brain…"
         : session?.focusMode
           ? fa
-            ? "فوکوس قفل است"
-            : "Focus lock engaged"
+            ? "فوکوس قفل — دارم می‌بینم"
+            : "Focus lock — still watching"
           : fa
-            ? "آماده"
-            : "Standing by";
+            ? "دارم همه‌چیز رو می‌بینم"
+            : "Watching everything";
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -120,59 +151,12 @@ export function App() {
     if (Number.isFinite(n)) cloud.patchSession({ price: n });
   };
 
-  const pushToTalk = async () => {
-    if (!cloud || !voice.supported.stt) return;
-    cloud.setListening(true);
-    try {
-      const text = await voice.listen(uiLang);
-      cloud.setListening(false);
-      if (hasPersian(text)) setUiLang("fa");
-      cloud.chat(text);
-    } catch {
-      cloud.setListening(false);
-    }
-  };
-
-  if (!tokenReady) {
+  if (!cfg) {
     return (
-      <div className="app gate" dir={fa ? "rtl" : "ltr"}>
+      <div className="app gate" dir="rtl">
         <div className="gate-card">
           <div className="brand-mark">MICHEAL</div>
-          <p className="gate-copy">
-            {fa
-              ? "توکن ابری را وارد کن تا HUD زنده روی سرور آلمان وصل شود. لینک مرورگر همیشه آنلاین می‌ماند."
-              : "Enter your cloud token to link the always-live Germany brain. Browser HUD stays online."}
-          </p>
-          <label className="field">
-            <span>Token</span>
-            <input
-              value={tokenDraft}
-              onChange={(e) => setTokenDraft(e.target.value)}
-              placeholder="MICHEAL_TOKEN"
-              spellCheck={false}
-              autoComplete="off"
-            />
-          </label>
-          <p className="hint mono">{cloudUrl}</p>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              if (!tokenDraft.trim()) return;
-              saveToken(tokenDraft.trim());
-              setTokenReady(true);
-            }}
-          >
-            {fa ? "ورود به میشل" : "Enter Micheal"}
-          </button>
-          <div className="chips">
-            <button type="button" className={`chip ${fa ? "on" : ""}`} onClick={() => setUiLang("fa")}>
-              فارسی
-            </button>
-            <button type="button" className={`chip ${!fa ? "on" : ""}`} onClick={() => setUiLang("en")}>
-              English
-            </button>
-          </div>
+          <p className="gate-copy">در حال بیدار شدن… مثل جارویس، بدون ورودی.</p>
         </div>
       </div>
     );
@@ -185,23 +169,22 @@ export function App() {
           <div className="brand-mark">MICHEAL</div>
           <div className="brand-sub">
             {fa
-              ? "دستیار معاملاتی · حضور دسکتاپ · مغز ابری آلمان · فارسی/EN"
-              : "TRADING ASSISTANT · DESKTOP PRESENCE · DE CLOUD BRAIN · FA/EN"}
+              ? "جارویس معاملاتی · همیشه بیدار · می‌بیند و می‌فهمد · فارسی/EN"
+              : "TRADING JARVIS · ALWAYS AWAKE · SEES & UNDERSTANDS · FA/EN"}
           </div>
         </div>
         <div className="pills">
           <span className="pill">
             <span className={`dot ${state.live ? "on" : ""}`} />
-            {state.live ? (fa ? "زنده" : "live") : fa ? "در حال وصل" : "linking"}
+            {state.live ? (fa ? "زنده" : "live") : fa ? "وصل…" : "linking"}
           </span>
           <span className="pill">
-            <span className={`dot ${state.connected ? "on" : ""}`} />
-            {state.connected ? (fa ? "ابر وصل" : "cloud linked") : fa ? "ابر قطع" : "cloud offline"}
+            <span className={`dot ${ears ? "warn" : state.connected ? "on" : ""}`} />
+            {ears ? (fa ? "گوش فعال" : "ears on") : state.connected ? (fa ? "چشم باز" : "eyes open") : fa ? "آفلاین" : "offline"}
           </span>
-          <span className="pill">
-            <span className={`dot ${state.status === "speaking" || state.status === "listening" ? "warn" : ""}`} />
-            {state.status}
-          </span>
+          <button type="button" className={`chip ${ambientOn ? "on" : ""}`} onClick={() => setAmbientOn((v) => !v)}>
+            {fa ? (ambientOn ? "شنود دائم" : "شنود خاموش") : ambientOn ? "Always listen" : "Listen off"}
+          </button>
           <button type="button" className={`chip ${fa ? "on" : ""}`} onClick={() => setUiLang(fa ? "en" : "fa")}>
             {fa ? "EN" : "FA"}
           </button>
@@ -219,20 +202,24 @@ export function App() {
           <div className="caption">
             <h2>{caption}</h2>
             <p>
-              {session
+              {heard
                 ? fa
-                  ? `نظارت روی ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. صدا روی پی‌سی — قضاوت روی سرور آلمان.`
-                  : `Watching ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. Voice on the PC — judgment on the Germany server.`
-                : fa
-                  ? "در حال اتصال به مغز ابری خصوصی…"
-                  : "Connecting to your private cloud brain…"}
+                  ? `شنیدم: ${heard}`
+                  : `Hearing: ${heard}`
+                : session
+                  ? fa
+                    ? `مراقب ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. لازم نیست کلیک کنی — حرف بزن یا فقط کار کن.`
+                    : `On ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. No clicks needed — speak or just work.`
+                  : fa
+                    ? "مغز ابری در حال همگام‌سازی…"
+                    : "Cloud brain syncing…"}
             </p>
           </div>
         </section>
 
         <aside className="side">
           <section className="panel">
-            <h3>{fa ? "فید جلسه" : "Session feed"}</h3>
+            <h3>{fa ? "فید جلسه (خودکار دیده می‌شود)" : "Session feed (auto-watched)"}</h3>
             <div className="grid2">
               <div className="field">
                 <label htmlFor="symbol">{fa ? "نماد" : "Symbol"}</label>
@@ -314,7 +301,7 @@ export function App() {
           </section>
 
           <section className="panel transcript">
-            <h3>{fa ? "کانال" : "Channel"}</h3>
+            <h3>{fa ? "کانال زنده" : "Live channel"}</h3>
             <div className={`scroll ${rtlChat ? "rtl-text" : ""}`} ref={scrollRef}>
               {state.messages.map((m) => (
                 <div key={m.id} className={`bubble ${m.role}`} dir={hasPersian(m.text) ? "rtl" : "ltr"}>
@@ -333,26 +320,18 @@ export function App() {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder={fa ? "با میشل حرف بزن…" : "Talk to Micheal…"}
+                placeholder={fa ? "اختیاری — معمولاً فقط حرف بزن" : "Optional — usually just speak"}
                 aria-label="Message"
                 dir={hasPersian(draft) ? "rtl" : "auto"}
               />
-              <button
-                type="button"
-                className={`btn ghost mic ${state.listening ? "on" : ""}`}
-                onClick={() => void pushToTalk()}
-                disabled={!voice.supported.stt}
-              >
-                {fa ? "میک" : "Mic"}
-              </button>
               <button type="submit" className="btn">
                 {fa ? "ارسال" : "Send"}
               </button>
             </form>
             <p className="hint">
               {fa
-                ? "پی‌سی: صدا + HUD · ابر (آلمان): مغز + حافظه · مرورگر همیشه زنده · Chrome/Edge برای میک"
-                : "PC: voice + HUD · Cloud (DE): brain + memory · Browser always live · Chrome/Edge for mic"}
+                ? "بدون ورود توکن · شنود دائم · آگاهی خودکار از جلسه · Chrome/Edge برای میک"
+                : "No token typing · always listening · auto session awareness · Chrome/Edge for mic"}
             </p>
           </section>
         </aside>

@@ -31,6 +31,7 @@ interface SpeechRecognition extends EventTarget {
 }
 
 interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
   readonly results: SpeechRecognitionResultList;
 }
 

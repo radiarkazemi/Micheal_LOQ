@@ -8,6 +8,7 @@ import type { ChatMessage, ClientPacket, ServerPacket } from "@micheal/protocol"
 import { think } from "./brain.js";
 import { loadConfig } from "./config.js";
 import { detectLang } from "./lang.js";
+import { observeAmbient } from "./observe.js";
 import { TradingSession } from "./session.js";
 
 const config = loadConfig();
@@ -27,6 +28,8 @@ interface ClientCtx {
   messages: ChatMessage[];
   authed: boolean;
   lastPongAt: number;
+  lastSpokeAt: number;
+  observing: boolean;
 }
 
 const clients = new Set<ClientCtx>();
@@ -80,6 +83,7 @@ async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
     preferredLang: lang,
   });
   pushMessage(ctx, "micheal", reply.text, reply.speak);
+  ctx.lastSpokeAt = Date.now();
   send(ctx.ws, { type: "status", status: "online" });
 }
 
@@ -169,7 +173,21 @@ const server = createServer(async (req, res) => {
       brain: config.openaiApiKey ? "openai" : "heuristic",
       clients: clients.size,
       hud: existsSync(join(HUD_DIR, "index.html")),
+      jarvis: true,
       time: Date.now(),
+    });
+    return;
+  }
+
+  // Auto-link HUD/Electron with zero typing — token comes from server env.
+  if (req.method === "GET" && url.pathname === "/v1/bootstrap") {
+    json(res, 200, {
+      ok: true,
+      jarvis: true,
+      url: `http://${req.headers.host || "91.107.171.162:8787"}`.replace(/\/$/, ""),
+      token: config.token,
+      alwaysOn: true,
+      ambient: true,
     });
     return;
   }
@@ -240,6 +258,8 @@ wss.on("connection", (ws) => {
     messages: [],
     authed: false,
     lastPongAt: Date.now(),
+    lastSpokeAt: 0,
+    observing: false,
   };
   clients.add(ctx);
   send(ws, { type: "status", status: "auth_required" });
@@ -275,6 +295,7 @@ wss.on("connection", (ws) => {
           preferredLang: ctx.session.getLang(),
         });
         pushMessage(ctx, "micheal", greet.text, greet.speak);
+        ctx.lastSpokeAt = Date.now();
         return;
       }
 
@@ -296,6 +317,7 @@ wss.on("connection", (ws) => {
           const focus = ctx.session.snapshot().focusMode;
           if (!(focus && hint.priority === "low")) {
             pushMessage(ctx, "micheal", hint.text, true);
+            ctx.lastSpokeAt = Date.now();
           }
         }
         return;
@@ -316,14 +338,35 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Idle focus nudges
+// Continuous Jarvis awareness — watch session without waiting for user input
 setInterval(() => {
   for (const ctx of clients) {
-    if (!ctx.authed) continue;
-    const hint = ctx.session.checkIdle();
-    if (hint) pushMessage(ctx, "micheal", hint.text, true);
+    if (!ctx.authed || ctx.observing) continue;
+    void (async () => {
+      ctx.observing = true;
+      try {
+        const idle = ctx.session.checkIdle();
+        if (idle) {
+          pushMessage(ctx, "micheal", idle.text, true);
+          ctx.lastSpokeAt = Date.now();
+          return;
+        }
+        const obs = observeAmbient({
+          session: ctx.session.snapshot(),
+          recent: ctx.messages,
+          lang: ctx.session.getLang(),
+          lastSpokeAt: ctx.lastSpokeAt,
+        });
+        if (obs) {
+          pushMessage(ctx, "micheal", obs.text, obs.speak);
+          ctx.lastSpokeAt = Date.now();
+        }
+      } finally {
+        ctx.observing = false;
+      }
+    })();
   }
-}, 30_000);
+}, 20_000);
 
 // Live keepalive: drop dead sockets fast so reconnects stay snappy
 setInterval(() => {

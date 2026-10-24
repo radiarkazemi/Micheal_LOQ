@@ -63,15 +63,43 @@ export function readConfig(): MichealConfig {
     s.token ||
     import.meta.env.VITE_MICHEAL_TOKEN ||
     import.meta.env.VITE_VIGIL_TOKEN ||
-    "dev-token-change-me";
+    "";
   const url = (q.url || s.url || defaultUrl()).replace(/\/$/, "");
   return { url, token };
 }
 
-export function saveToken(token: string): void {
+/** Zero-input bootstrap from the live cloud (Jarvis opens already linked). */
+export async function loadConfig(): Promise<MichealConfig> {
+  const base = readConfig();
   try {
-    localStorage.setItem(TOKEN_KEY, token.trim());
+    const bootstrapUrl = `${base.url || defaultUrl()}/v1/bootstrap`;
+    const res = await fetch(bootstrapUrl, { cache: "no-store" });
+    if (res.ok) {
+      const data = (await res.json()) as { token?: string; url?: string; ok?: boolean };
+      if (data.token) {
+        try {
+          localStorage.setItem(TOKEN_KEY, data.token);
+        } catch {
+          /* ignore */
+        }
+        return {
+          url: (data.url || base.url || defaultUrl()).replace(/\/$/, ""),
+          token: data.token,
+        };
+      }
+    }
   } catch {
-    /* ignore */
+    /* fall through */
   }
+  // Dev / Electron fallback
+  if (!base.token) {
+    return {
+      ...base,
+      token:
+        import.meta.env.VITE_MICHEAL_TOKEN ||
+        import.meta.env.VITE_VIGIL_TOKEN ||
+        "dev-token-change-me",
+    };
+  }
+  return base;
 }
