@@ -23,7 +23,10 @@ export class MichealCloud {
   private voiceEnabled = true;
   private readonly listeners = new Set<Listener>();
   private reconnectTimer: number | null = null;
+  private intentionalClose = false;
   private readonly onSpeak: (text: string) => Promise<void>;
+  /** Cached snapshot — must be referentially stable for useSyncExternalStore. */
+  private snapshot: CloudState;
 
   constructor(
     private readonly url: string,
@@ -31,6 +34,7 @@ export class MichealCloud {
     onSpeak: (text: string) => Promise<void>,
   ) {
     this.onSpeak = onSpeak;
+    this.snapshot = this.buildSnapshot();
   }
 
   subscribe(listener: Listener): () => void {
@@ -39,6 +43,10 @@ export class MichealCloud {
   }
 
   getState(): CloudState {
+    return this.snapshot;
+  }
+
+  private buildSnapshot(): CloudState {
     return {
       connected: this.connected,
       status: this.status,
@@ -51,7 +59,11 @@ export class MichealCloud {
   }
 
   connect(): void {
+    this.intentionalClose = false;
     this.clearReconnect();
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
     this.status = "connecting";
     this.emit();
 
@@ -73,6 +85,12 @@ export class MichealCloud {
 
     ws.onclose = () => {
       this.connected = false;
+      this.ws = null;
+      if (this.intentionalClose) {
+        this.status = "offline";
+        this.emit();
+        return;
+      }
       this.status = "reconnecting";
       this.emit();
       this.scheduleReconnect();
@@ -85,9 +103,13 @@ export class MichealCloud {
   }
 
   disconnect(): void {
+    this.intentionalClose = true;
     this.clearReconnect();
-    this.ws?.close();
+    const ws = this.ws;
     this.ws = null;
+    if (ws && ws.readyState < WebSocket.CLOSING) {
+      ws.close();
+    }
     this.connected = false;
     this.status = "offline";
     this.emit();
@@ -175,6 +197,7 @@ export class MichealCloud {
   }
 
   private emit(): void {
+    this.snapshot = this.buildSnapshot();
     for (const l of this.listeners) l();
   }
 }

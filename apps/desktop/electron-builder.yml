@@ -1,0 +1,18 @@
+appId: com.micheal.desktop
+productName: Micheal
+directories:
+  output: release
+files:
+  - dist/**
+  - electron/**
+  - package.json
+asar: true
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+mac:
+  target:
+    - dmg

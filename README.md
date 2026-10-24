@@ -4,7 +4,7 @@ Jarvis-style trading companion named **Micheal**.
 
 | Piece | Where | Job |
 | --- | --- | --- |
-| **Desktop** (`apps/desktop`) | Your PC | Sci-fi HUD, mic, speakers, session controls |
+| **Desktop** (`apps/desktop`) | Your PC | Electron HUD + voice (Vite renderer), session controls |
 | **Cloud brain** (`apps/server`) | Germany VPS | Personality, focus coaching, memory, optional LLM |
 | **Protocol** (`packages/protocol`) | Shared | WebSocket / REST message types |
 
@@ -16,11 +16,14 @@ Repo: [radiarkazemi/Micheal_LOQ](https://github.com/radiarkazemi/Micheal_LOQ)
 pnpm install
 pnpm --filter @micheal/protocol build
 MICHEAL_TOKEN=dev-token-change-me pnpm --filter @micheal/server dev
-# other terminal
+# other terminal — browser HUD
 VITE_MICHEAL_URL=http://127.0.0.1:8787 VITE_MICHEAL_TOKEN=dev-token-change-me pnpm --filter @micheal/desktop dev
+# or Electron shell (PC app)
+VITE_MICHEAL_URL=http://91.107.171.162:8787 VITE_MICHEAL_TOKEN=<token> pnpm --filter @micheal/desktop dev:electron
 ```
 
-Open http://127.0.0.1:5174 (Chrome/Edge for voice).
+Browser HUD: http://127.0.0.1:5174. Electron: `pnpm pack:desktop` builds an installer under `apps/desktop/release`.
+Copy `apps/desktop/.env.example` → `.env.local` for desktop env (gitignored).
 
 ## Production shape
 

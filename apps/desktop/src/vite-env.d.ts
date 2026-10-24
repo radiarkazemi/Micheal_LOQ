@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+interface MichealDesktopBridge {
+  readonly platform: string;
+  readonly isElectron: true;
+}
+
 interface ImportMetaEnv {
   readonly VITE_MICHEAL_URL: string;
   readonly VITE_MICHEAL_TOKEN: string;
@@ -52,6 +57,7 @@ declare var SpeechRecognition: { new (): SpeechRecognition };
 declare var webkitSpeechRecognition: { new (): SpeechRecognition };
 
 interface Window {
+  readonly michealDesktop?: MichealDesktopBridge;
   SpeechRecognition?: typeof SpeechRecognition;
   webkitSpeechRecognition?: typeof SpeechRecognition;
 }
