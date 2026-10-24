@@ -1,10 +1,13 @@
+const PERSIAN_RE = /[\u0600-\u06FF]/;
+
 export interface Voice {
   readonly supported: { readonly tts: boolean; readonly stt: boolean };
   speak(text: string): Promise<void>;
   stop(): void;
-  listen(): Promise<string>;
+  listen(lang?: "en" | "fa"): Promise<string>;
   setEnabled(on: boolean): void;
   isEnabled(): boolean;
+  setListenLang(lang: "en" | "fa"): void;
 }
 
 export function createVoice(): Voice {
@@ -12,10 +15,21 @@ export function createVoice(): Voice {
   const Recognition = window.SpeechRecognition ?? window.webkitSpeechRecognition;
   const stt = Boolean(Recognition);
   let enabled = true;
+  let listenLang: "en" | "fa" = "fa";
   let recognition: SpeechRecognition | null = null;
 
-  const pickVoice = (): SpeechSynthesisVoice | null => {
+  const pickVoice = (text: string): SpeechSynthesisVoice | null => {
     const voices = window.speechSynthesis.getVoices();
+    const wantFa = PERSIAN_RE.test(text);
+    if (wantFa) {
+      return (
+        voices.find((v) => /fa/i.test(v.lang)) ??
+        voices.find((v) => /persian|farsi/i.test(v.name)) ??
+        voices.find((v) => /en-/i.test(v.lang)) ??
+        voices[0] ??
+        null
+      );
+    }
     return (
       voices.find((v) => /en-GB/i.test(v.lang) && /male|daniel|google uk/i.test(v.name)) ??
       voices.find((v) => /en-GB/i.test(v.lang)) ??
@@ -32,13 +46,17 @@ export function createVoice(): Voice {
       if (!on) this.stop();
     },
     isEnabled: () => enabled,
+    setListenLang(lang) {
+      listenLang = lang;
+    },
     speak(text) {
       if (!enabled || !tts || !text.trim()) return Promise.resolve();
       window.speechSynthesis.cancel();
       return new Promise((resolve) => {
         const utter = new SpeechSynthesisUtterance(text);
-        const voice = pickVoice();
+        const voice = pickVoice(text);
         if (voice) utter.voice = voice;
+        utter.lang = PERSIAN_RE.test(text) ? "fa-IR" : voice?.lang || "en-GB";
         utter.rate = 0.98;
         utter.pitch = 0.92;
         utter.onend = () => resolve();
@@ -55,22 +73,23 @@ export function createVoice(): Voice {
       }
       recognition = null;
     },
-    listen() {
+    listen(lang) {
       if (!enabled || !Recognition) {
         return Promise.reject(new Error("Mic needs Chrome/Edge on the PC."));
       }
       this.stop();
+      const use = lang ?? listenLang;
       return new Promise((resolve, reject) => {
         const rec = new Recognition();
         recognition = rec;
-        rec.lang = "en-US";
+        rec.lang = use === "fa" ? "fa-IR" : "en-US";
         rec.interimResults = false;
         rec.continuous = false;
         rec.onresult = (event) => {
           const transcript = event.results[0]?.[0]?.transcript?.trim() ?? "";
           recognition = null;
           if (transcript) resolve(transcript);
-          else reject(new Error("Didn't catch that."));
+          else reject(new Error(use === "fa" ? "نشنیدم." : "Didn't catch that."));
         };
         rec.onerror = (event) => {
           recognition = null;

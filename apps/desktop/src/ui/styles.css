@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap");
+
 :root {
   --bg0: #03060a;
   --bg1: #070d14;
@@ -13,7 +15,7 @@
   --ok: #3dd68c;
   --danger: #ff6b7a;
   --font-display: "Orbitron", sans-serif;
-  --font-body: "IBM Plex Sans", sans-serif;
+  --font-body: "Vazirmatn", "IBM Plex Sans", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
   color-scheme: dark;
 }
@@ -480,5 +482,60 @@ textarea {
   }
   50% {
     opacity: 0.45;
+  }
+}
+
+.app[dir="rtl"] .brand-sub,
+.app[dir="rtl"] .caption p,
+.app[dir="rtl"] .hint,
+.app[dir="rtl"] .bubble {
+  font-family: var(--font-body);
+}
+
+.rtl-text .bubble {
+  text-align: start;
+}
+
+.gate {
+  place-items: center;
+  display: grid;
+}
+
+.gate-card {
+  width: min(440px, 92vw);
+  padding: 28px 24px;
+  border: 1px solid var(--line-bright);
+  background: var(--panel);
+  border-radius: 18px;
+  display: grid;
+  gap: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  animation: rise 0.55s ease both;
+}
+
+.gate-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+@media (max-width: 900px) {
+  body {
+    overflow: auto;
+  }
+
+  .app {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .stage {
+    grid-template-columns: 1fr;
   }
 }

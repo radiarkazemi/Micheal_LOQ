@@ -61,9 +61,11 @@ After=network.target
 Type=simple
 WorkingDirectory=${RELEASE_DIR}
 EnvironmentFile=${ENV_FILE}
+Environment=MICHEAL_HUD_DIR=${RELEASE_DIR}/hud
+Environment=MICHEAL_DOWNLOAD_DIR=${RELEASE_DIR}/download
 ExecStart=/usr/bin/node ${RELEASE_DIR}/server/index.js
 Restart=always
-RestartSec=3
+RestartSec=2
 User=root
 
 [Install]

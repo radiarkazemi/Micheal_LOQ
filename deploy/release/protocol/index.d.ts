@@ -22,7 +22,7 @@ export interface ChatMessage {
 /** Client → server */
 export type ClientPacket = {
     readonly type: "hello";
-    readonly client: "desktop";
+    readonly client: "desktop" | "browser" | "electron";
     readonly token: string;
 } | {
     readonly type: "chat";

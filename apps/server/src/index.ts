@@ -1,21 +1,51 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { createReadStream, existsSync, statSync } from "node:fs";
+import { extname, join, normalize, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { ChatMessage, ClientPacket, ServerPacket } from "@micheal/protocol";
 import { think } from "./brain.js";
 import { loadConfig } from "./config.js";
+import { detectLang } from "./lang.js";
 import { TradingSession } from "./session.js";
 
 const config = loadConfig();
+const here = fileURLToPath(new URL(".", import.meta.url));
+const HUD_DIR = resolve(
+  process.env.MICHEAL_HUD_DIR?.trim() ||
+    join(here, "..", "hud") ||
+    join(here, "hud"),
+);
+const DOWNLOAD_DIR = resolve(
+  process.env.MICHEAL_DOWNLOAD_DIR?.trim() || join(here, "..", "download"),
+);
 
 interface ClientCtx {
   readonly ws: WebSocket;
   readonly session: TradingSession;
   messages: ChatMessage[];
   authed: boolean;
+  lastPongAt: number;
 }
 
 const clients = new Set<ClientCtx>();
+
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff2": "font/woff2",
+  ".exe": "application/octet-stream",
+  ".zip": "application/zip",
+  ".yml": "text/yaml; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
+};
 
 function send(ws: WebSocket, packet: ServerPacket): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(packet));
@@ -37,6 +67,8 @@ function pushMessage(ctx: ClientCtx, role: ChatMessage["role"], text: string, sp
 async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
+  const lang = detectLang(trimmed);
+  ctx.session.setLang(lang);
   ctx.session.touch();
   pushMessage(ctx, "you", trimmed, false);
   send(ctx.ws, { type: "status", status: "thinking" });
@@ -45,27 +77,30 @@ async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
     session: ctx.session.snapshot(),
     recent: ctx.messages,
     utterance: trimmed,
+    preferredLang: lang,
   });
   pushMessage(ctx, "micheal", reply.text, reply.speak);
   send(ctx.ws, { type: "status", status: "online" });
 }
 
+function cors(res: ServerResponse): void {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, authorization, x-micheal-token, x-vigil-token");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+}
+
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "content-type, authorization, x-micheal-token, x-vigil-token",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  });
+  cors(res);
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
   res.end(payload);
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveBody, reject) => {
     const chunks: Buffer[] = [];
     req.on("data", (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
 }
@@ -78,15 +113,50 @@ function tokenFromReq(req: IncomingMessage, bodyToken?: string): string {
   return bodyToken?.trim() || "";
 }
 
+function safeJoin(root: string, reqPath: string): string | null {
+  const cleaned = normalize(decodeURIComponent(reqPath)).replace(/^(\.\.[/\\])+/, "");
+  const full = resolve(root, cleaned);
+  if (!full.startsWith(root)) return null;
+  return full;
+}
+
+function sendFile(res: ServerResponse, filePath: string, cache = "public, max-age=300"): void {
+  const ext = extname(filePath).toLowerCase();
+  const type = MIME[ext] || "application/octet-stream";
+  const stat = statSync(filePath);
+  cors(res);
+  res.writeHead(200, {
+    "Content-Type": type,
+    "Content-Length": stat.size,
+    "Cache-Control": ext === ".html" ? "no-cache" : cache,
+  });
+  createReadStream(filePath).pipe(res);
+}
+
+function tryStatic(res: ServerResponse, root: string, urlPath: string): boolean {
+  if (!existsSync(root)) return false;
+  let rel = urlPath.replace(/^\//, "");
+  if (!rel || rel.endsWith("/")) rel = join(rel, "index.html");
+  const file = safeJoin(root, rel);
+  if (!file || !existsSync(file) || !statSync(file).isFile()) {
+    // SPA fallback
+    const index = join(root, "index.html");
+    if (existsSync(index) && !urlPath.startsWith("/v1/") && !urlPath.startsWith("/download/")) {
+      sendFile(res, index, "no-cache");
+      return true;
+    }
+    return false;
+  }
+  sendFile(res, file);
+  return true;
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
 
   if (req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "content-type, authorization, x-micheal-token, x-vigil-token",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    });
+    cors(res);
+    res.writeHead(204);
     res.end();
     return;
   }
@@ -97,6 +167,17 @@ const server = createServer(async (req, res) => {
       service: "micheal-cloud",
       region: "de-fsn",
       brain: config.openaiApiKey ? "openai" : "heuristic",
+      clients: clients.size,
+      hud: existsSync(join(HUD_DIR, "index.html")),
+      time: Date.now(),
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/v1/live") {
+    json(res, 200, {
+      ok: true,
+      live: true,
       clients: clients.size,
       time: Date.now(),
     });
@@ -116,17 +197,35 @@ const server = createServer(async (req, res) => {
         return;
       }
       const session = new TradingSession(body.session);
+      const lang = detectLang(body.text || "");
+      session.setLang(lang);
       const reply = await think({
         config,
         session: session.snapshot(),
         recent: [],
         utterance: body.text || "",
+        preferredLang: lang,
       });
       json(res, 200, { reply });
     } catch (err) {
       json(res, 400, { error: err instanceof Error ? err.message : "bad request" });
     }
     return;
+  }
+
+  if (req.method === "GET" && url.pathname.startsWith("/download/")) {
+    const rel = url.pathname.slice("/download/".length);
+    const file = safeJoin(DOWNLOAD_DIR, rel);
+    if (file && existsSync(file) && statSync(file).isFile()) {
+      sendFile(res, file, "public, max-age=60");
+      return;
+    }
+    json(res, 404, { error: "download not found" });
+    return;
+  }
+
+  if (req.method === "GET") {
+    if (tryStatic(res, HUD_DIR, url.pathname)) return;
   }
 
   json(res, 404, { error: "not found" });
@@ -140,6 +239,7 @@ wss.on("connection", (ws) => {
     session: new TradingSession(),
     messages: [],
     authed: false,
+    lastPongAt: Date.now(),
   };
   clients.add(ctx);
   send(ws, { type: "status", status: "auth_required" });
@@ -161,6 +261,7 @@ wss.on("connection", (ws) => {
           return;
         }
         ctx.authed = true;
+        ctx.lastPongAt = Date.now();
         send(ws, {
           type: "welcome",
           session: ctx.session.snapshot(),
@@ -171,6 +272,7 @@ wss.on("connection", (ws) => {
           config,
           session: ctx.session.snapshot(),
           recent: [],
+          preferredLang: ctx.session.getLang(),
         });
         pushMessage(ctx, "micheal", greet.text, greet.speak);
         return;
@@ -182,6 +284,7 @@ wss.on("connection", (ws) => {
       }
 
       if (packet.type === "ping") {
+        ctx.lastPongAt = Date.now();
         send(ws, { type: "pong", serverTime: Date.now() });
         return;
       }
@@ -213,6 +316,7 @@ wss.on("connection", (ws) => {
   });
 });
 
+// Idle focus nudges
 setInterval(() => {
   for (const ctx of clients) {
     if (!ctx.authed) continue;
@@ -221,8 +325,26 @@ setInterval(() => {
   }
 }, 30_000);
 
+// Live keepalive: drop dead sockets fast so reconnects stay snappy
+setInterval(() => {
+  const now = Date.now();
+  for (const ctx of clients) {
+    if (!ctx.authed) continue;
+    if (now - ctx.lastPongAt > 45_000) {
+      try {
+        ctx.ws.terminate();
+      } catch {
+        /* ignore */
+      }
+      clients.delete(ctx);
+      continue;
+    }
+    send(ctx.ws, { type: "status", status: "online" });
+  }
+}, 15_000);
+
 server.listen(config.port, config.host, () => {
   console.log(
-    `[micheal] cloud brain listening on http://${config.host}:${config.port}  brain=${config.openaiApiKey ? "openai" : "heuristic"}`,
+    `[micheal] cloud brain listening on http://${config.host}:${config.port}  brain=${config.openaiApiKey ? "openai" : "heuristic"} hud=${HUD_DIR}`,
   );
 });

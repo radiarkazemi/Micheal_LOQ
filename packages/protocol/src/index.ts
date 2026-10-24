@@ -25,7 +25,7 @@ export interface ChatMessage {
 
 /** Client → server */
 export type ClientPacket =
-  | { readonly type: "hello"; readonly client: "desktop"; readonly token: string }
+  | { readonly type: "hello"; readonly client: "desktop" | "browser" | "electron"; readonly token: string }
   | { readonly type: "chat"; readonly text: string; readonly id?: string }
   | { readonly type: "session.patch"; readonly patch: Partial<SessionState> }
   | { readonly type: "ping" };

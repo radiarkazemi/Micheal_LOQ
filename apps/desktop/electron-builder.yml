@@ -9,7 +9,20 @@ files:
 asar: true
 win:
   target:
-    - nsis
+    - target: portable
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Micheal-Setup-${version}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Micheal
 linux:
   target:
     - AppImage

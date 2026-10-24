@@ -8,6 +8,7 @@ export interface CloudState {
   readonly speaking: boolean;
   readonly listening: boolean;
   readonly voiceEnabled: boolean;
+  readonly live: boolean;
 }
 
 type Listener = () => void;
@@ -21,8 +22,10 @@ export class MichealCloud {
   private speaking = false;
   private listening = false;
   private voiceEnabled = true;
+  private live = false;
   private readonly listeners = new Set<Listener>();
   private reconnectTimer: number | null = null;
+  private pingTimer: number | null = null;
   private intentionalClose = false;
   private readonly onSpeak: (text: string) => Promise<void>;
   /** Cached snapshot — must be referentially stable for useSyncExternalStore. */
@@ -55,6 +58,7 @@ export class MichealCloud {
       speaking: this.speaking,
       listening: this.listening,
       voiceEnabled: this.voiceEnabled,
+      live: this.live,
     };
   }
 
@@ -65,6 +69,7 @@ export class MichealCloud {
       return;
     }
     this.status = "connecting";
+    this.live = false;
     this.emit();
 
     const base = this.url.replace(/\/$/, "");
@@ -77,6 +82,7 @@ export class MichealCloud {
       this.status = "authenticating";
       this.emit();
       this.send({ type: "hello", client: "desktop", token: this.token });
+      this.startPing();
     };
 
     ws.onmessage = (event) => {
@@ -85,7 +91,9 @@ export class MichealCloud {
 
     ws.onclose = () => {
       this.connected = false;
+      this.live = false;
       this.ws = null;
+      this.stopPing();
       if (this.intentionalClose) {
         this.status = "offline";
         this.emit();
@@ -98,6 +106,7 @@ export class MichealCloud {
 
     ws.onerror = () => {
       this.status = "socket error";
+      this.live = false;
       this.emit();
     };
   }
@@ -105,12 +114,14 @@ export class MichealCloud {
   disconnect(): void {
     this.intentionalClose = true;
     this.clearReconnect();
+    this.stopPing();
     const ws = this.ws;
     this.ws = null;
     if (ws && ws.readyState < WebSocket.CLOSING) {
       ws.close();
     }
     this.connected = false;
+    this.live = false;
     this.status = "offline";
     this.emit();
   }
@@ -138,6 +149,7 @@ export class MichealCloud {
       case "welcome":
         this.session = packet.session;
         this.status = "online";
+        this.live = true;
         this.emit();
         break;
       case "session":
@@ -146,6 +158,7 @@ export class MichealCloud {
         break;
       case "status":
         this.status = packet.status;
+        if (packet.status === "online") this.live = true;
         this.emit();
         break;
       case "message":
@@ -174,6 +187,8 @@ export class MichealCloud {
         this.emit();
         break;
       case "pong":
+        this.live = true;
+        this.emit();
         break;
     }
   }
@@ -184,9 +199,24 @@ export class MichealCloud {
     }
   }
 
+  private startPing(): void {
+    this.stopPing();
+    this.pingTimer = window.setInterval(() => {
+      this.send({ type: "ping" });
+    }, 12_000);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer != null) {
+      window.clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
+  }
+
   private scheduleReconnect(): void {
     this.clearReconnect();
-    this.reconnectTimer = window.setTimeout(() => this.connect(), 2500);
+    // Fast reconnect for always-live feel
+    this.reconnectTimer = window.setTimeout(() => this.connect(), 800);
   }
 
   private clearReconnect(): void {
