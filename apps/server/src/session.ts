@@ -22,7 +22,7 @@ export class TradingSession {
   private readonly symbolHops: Hop[] = [];
   private readonly tfHops: Hop[] = [];
   private lastIdleNudgeAt = 0;
-  private lang: Lang = "en";
+  private lang: Lang = "fa";
 
   constructor(seed?: Partial<SessionState>) {
     const now = Date.now();
