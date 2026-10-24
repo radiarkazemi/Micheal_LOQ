@@ -5,7 +5,7 @@ export class TradingSession {
     symbolHops = [];
     tfHops = [];
     lastIdleNudgeAt = 0;
-    lang = "en";
+    lang = "fa";
     constructor(seed) {
         const now = Date.now();
         this.state = {
