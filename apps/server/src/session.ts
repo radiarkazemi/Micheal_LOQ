@@ -27,8 +27,9 @@ export class TradingSession {
   constructor(seed?: Partial<SessionState>) {
     const now = Date.now();
     this.state = {
-      symbol: seed?.symbol ?? "XAUUSD",
-      timeframe: seed?.timeframe ?? "15",
+      // No defaults — choose together each session
+      symbol: seed?.symbol ?? "",
+      timeframe: seed?.timeframe ?? "",
       price: seed?.price ?? null,
       bias: seed?.bias ?? "unknown",
       note: seed?.note ?? "",
@@ -97,11 +98,12 @@ export class TradingSession {
     this.lastIdleNudgeAt = now;
     const mins = Math.round((now - this.state.lastActionAt) / 60_000);
     const fa = this.lang === "fa";
+    const where = this.state.symbol || (fa ? "جلسه" : "the session");
     return {
       priority: "normal",
       text: fa
-        ? `حدود ${mins} دقیقه روی ${this.state.symbol} ساکت بودی. هنوز پلن رو اجرا می‌کنی یا داری منحرف می‌شی؟`
-        : `You've been quiet for about ${mins} minutes on ${this.state.symbol}. Still executing the plan, or drifting?`,
+        ? `حدود ${mins} دقیقه روی ${where} ساکت بودی. هنوز پلن رو اجرا می‌کنی یا داری منحرف می‌شی؟`
+        : `You've been quiet for about ${mins} minutes on ${where}. Still executing the plan, or drifting?`,
     };
   }
 
@@ -109,11 +111,14 @@ export class TradingSession {
     const next = symbol.trim().toUpperCase();
     if (!next || next === this.state.symbol) return null;
     const now = Date.now();
+    const hadSymbol = Boolean(this.state.symbol);
     this.state.symbol = next;
     this.state.lastActionAt = now;
-    this.symbolHops.push({ at: now });
-    this.prune(this.symbolHops, now);
-    this.state.symbolSwitches = this.symbolHops.length;
+    if (hadSymbol) {
+      this.symbolHops.push({ at: now });
+      this.prune(this.symbolHops, now);
+      this.state.symbolSwitches = this.symbolHops.length;
+    }
     const fa = this.lang === "fa";
     if (this.symbolHops.length >= 4) {
       return {
@@ -133,13 +138,16 @@ export class TradingSession {
     const next = timeframe.trim();
     if (!next || next === this.state.timeframe) return null;
     const now = Date.now();
+    const hadTf = Boolean(this.state.timeframe);
     this.state.timeframe = next;
     this.state.lastActionAt = now;
-    this.tfHops.push({ at: now });
-    this.prune(this.tfHops, now);
-    this.state.timeframeSwitches = this.tfHops.length;
+    if (hadTf) {
+      this.tfHops.push({ at: now });
+      this.prune(this.tfHops, now);
+      this.state.timeframeSwitches = this.tfHops.length;
+    }
     const fa = this.lang === "fa";
-    if (this.tfHops.length >= 5) {
+    if (hadTf && this.tfHops.length >= 5) {
       return {
         priority: "high",
         text: fa

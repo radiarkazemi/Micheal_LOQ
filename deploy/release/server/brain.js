@@ -77,12 +77,17 @@ function heuristicThink(session, utterance, lang) {
     const q = raw.toLowerCase();
     const fa = lang === "fa";
     if (!raw) {
+        const ready = Boolean(session.symbol && session.timeframe);
         return {
             speak: true,
             lang,
             text: fa
-                ? `میشل آنلاینه. دارم همه‌چیز رو می‌بینم و می‌شنوم — ${session.symbol} تایم‌فریم ${session.timeframe}. لازم نیست چیزی تایپ کنی؛ حرف بزن یا فقط معامله کن، من مراقبم.`
-                : `Micheal online. I'm already watching and listening — ${session.symbol} ${session.timeframe}. No need to type; speak or just trade. I've got eyes on.`,
+                ? ready
+                    ? `میشل آنلاینه. با هم روی ${session.symbol} تایم‌فریم ${session.timeframe} هستیم. حرف بزن — گوش می‌دم.`
+                    : `میشل آنلاینه. هیچ پیش‌فرضی ندارم — با هم انتخاب می‌کنیم. امروز چه نماد و چه تایم‌فریمی؟ مثلاً بگو «طلا پانزده» یا «یورو دلار یک ساعت».`
+                : ready
+                    ? `Micheal online. We're on ${session.symbol} ${session.timeframe} together. Speak — I'm listening.`
+                    : `Micheal online. No defaults — we choose together. What symbol and timeframe today? Say e.g. "gold fifteen" or "EURUSD one hour".`,
         };
     }
     if (/(who are you|what are you|your name|who'?s micheal|who is micheal)\b/.test(q) ||
@@ -98,12 +103,19 @@ function heuristicThink(session, utterance, lang) {
     }
     if (/(status|systems|how are you|diagnostics)/.test(q) ||
         /(وضعیت|چطوری|چتری|سیستم|تشخیص)/.test(raw)) {
+        const board = session.symbol && session.timeframe
+            ? fa
+                ? `${session.symbol} روی ${session.timeframe}`
+                : `${session.symbol} on ${session.timeframe}`
+            : fa
+                ? "هنوز نماد/تایم‌فریم انتخاب نشده"
+                : "no symbol/TF chosen yet";
         return {
             speak: true,
             lang,
             text: fa
-                ? `همه‌چیز آماده‌ست. ${session.symbol} روی ${session.timeframe}. بایاس: ${biasFa(session.bias)}. فوکوس: ${session.focusMode ? "فعال" : "آماده"}.`
-                : `All systems nominal. Tracking ${session.symbol} on the ${session.timeframe}. Bias ${session.bias}. Focus mode ${session.focusMode ? "engaged" : "standby"}.`,
+                ? `همه‌چیز آماده‌ست. ${board}. بایاس: ${biasFa(session.bias)}. فوکوس: ${session.focusMode ? "فعال" : "آماده"}.`
+                : `All systems nominal. ${board}. Bias ${session.bias}. Focus mode ${session.focusMode ? "engaged" : "standby"}.`,
         };
     }
     if (/(focus|distract|tilt|revenge|fomo)/.test(q) ||
@@ -134,13 +146,19 @@ function heuristicThink(session, utterance, lang) {
                 : "I won't authorize entries. Checklist: is this your predefined setup, is risk sized, and is your head clear? If any answer is no — we stand down.",
         };
     }
-    if (/(hello|hi|hey|salam|salaam|سلام|درود)/.test(q) || /سلام|درود/.test(raw)) {
+    if ((/^(hello|hi|hey|salam|salaam|سلام|درود)([\s!.,،]?|$)/i.test(raw) ||
+        /^(سلام|درود)\s*(میشل)?\s*[!.،]?$/i.test(raw)) &&
+        !extractHasChartIntent(raw)) {
         return {
             speak: true,
             lang,
             text: fa
-                ? `سلام. ${session.symbol} ${session.timeframe} روی برده. پلن چیه؟`
-                : `Hello. ${session.symbol} ${session.timeframe} on the board. What's the plan?`,
+                ? session.symbol && session.timeframe
+                    ? `سلام. ${session.symbol} ${session.timeframe} روی برده. پلن چیه؟`
+                    : `سلام. هیچ پیش‌فرضی ندارم — با هم شروع کنیم. نماد و تایم‌فریم چی باشه؟`
+                : session.symbol && session.timeframe
+                    ? `Hello. ${session.symbol} ${session.timeframe} on the board. What's the plan?`
+                    : `Hello. No defaults — we start together. Symbol and timeframe?`,
         };
     }
     if (/(quiet|stop talking|mute|shh)/.test(q) || /(ساکت|قطع کن|بی‌صدا)/.test(raw)) {
@@ -188,6 +206,15 @@ function heuristicThink(session, utterance, lang) {
                 : "Well done. Don't let the win write the next trade. Same discipline as the loser.",
         };
     }
+    if (!session.symbol || !session.timeframe) {
+        return {
+            speak: true,
+            lang,
+            text: fa
+                ? `گرفتم. اول با هم چارچوب رو ببندیم — نماد و تایم‌فریم چی باشه؟ بعدش کنارت می‌مونم.`
+                : `Got it. First let's lock the frame together — symbol and timeframe? Then I stay with you.`,
+        };
+    }
     return {
         speak: true,
         lang,
@@ -195,6 +222,9 @@ function heuristicThink(session, utterance, lang) {
             ? `فهمیدم. روی ${session.symbol} ${session.timeframe} کنارت هستم. بپرس چی می‌بینم، یا قیمت و بایاس رو آپدیت کن تا درست مراقبت کنم.`
             : `Understood. On ${session.symbol} ${session.timeframe} — I'm with you. Ask what I'm seeing, or update price and bias so I can watch properly.`,
     };
+}
+function extractHasChartIntent(text) {
+    return /(xauusd|eurusd|طلا|انس|یورو|پوند|تایم|پانزده|پونزده|\b\d+\b|gold|tf)/i.test(text);
 }
 function biasFa(bias) {
     switch (bias) {
@@ -209,6 +239,11 @@ function biasFa(bias) {
     }
 }
 function narrate(session, fa) {
+    if (!session.symbol || !session.timeframe) {
+        return fa
+            ? "هنوز چارتی قفل نکردیم. بگو نماد و تایم‌فریم تا با هم بخونیمش."
+            : "No chart locked yet. Tell me symbol and timeframe so we can read it together.";
+    }
     const price = session.price != null
         ? fa
             ? ` آخرین مارک: ${formatPrice(session.price)}.`

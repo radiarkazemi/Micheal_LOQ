@@ -519,6 +519,29 @@ textarea {
   line-height: 1.55;
 }
 
+.btn.talk {
+  margin-top: 14px;
+  width: min(100%, 320px);
+  padding: 14px 18px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  border-radius: 14px;
+  border: 1px solid var(--cyan-dim);
+  background: linear-gradient(180deg, rgba(79, 214, 196, 0.22), rgba(79, 214, 196, 0.08));
+  cursor: pointer;
+}
+
+.btn.talk.on,
+.btn.talk:active {
+  background: linear-gradient(180deg, rgba(79, 214, 196, 0.45), rgba(79, 214, 196, 0.18));
+  box-shadow: 0 0 24px rgba(79, 214, 196, 0.35);
+}
+
+.hint.danger {
+  color: var(--danger);
+  margin-top: 8px;
+}
+
 .mono {
   font-family: var(--font-mono);
   font-size: 0.78rem;

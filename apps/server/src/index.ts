@@ -8,6 +8,7 @@ import type { ChatMessage, ClientPacket, ServerPacket } from "@micheal/protocol"
 import { think } from "./brain.js";
 import { loadConfig } from "./config.js";
 import { detectLang } from "./lang.js";
+import { extractSessionPatch } from "./intent.js";
 import { observeAmbient } from "./observe.js";
 import { TradingSession } from "./session.js";
 
@@ -71,16 +72,29 @@ async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
   const lang = detectLang(trimmed);
-  ctx.session.setLang(lang);
+  ctx.session.setLang(lang === "en" ? "en" : "fa");
   ctx.session.touch();
   pushMessage(ctx, "you", trimmed, false);
+
+  // Choose session together from speech/text (symbol / TF / bias)
+  const patch = extractSessionPatch(trimmed);
+  if (patch) {
+    const hint = ctx.session.patch(patch);
+    send(ctx.ws, { type: "session", session: ctx.session.snapshot() });
+    if (hint && hint.priority !== "low") {
+      // fall through to think for a fuller Persian reply
+    } else if (hint) {
+      // Acknowledge briefly via full brain so tone stays Micheal
+    }
+  }
+
   send(ctx.ws, { type: "status", status: "thinking" });
   const reply = await think({
     config,
     session: ctx.session.snapshot(),
     recent: ctx.messages,
     utterance: trimmed,
-    preferredLang: lang,
+    preferredLang: lang === "en" ? "en" : "fa",
   });
   pushMessage(ctx, "micheal", reply.text, reply.speak);
   ctx.lastSpokeAt = Date.now();
@@ -216,15 +230,17 @@ const server = createServer(async (req, res) => {
       }
       const session = new TradingSession(body.session);
       const lang = detectLang(body.text || "");
-      session.setLang(lang);
+      session.setLang(lang === "en" ? "en" : "fa");
+      const patch = extractSessionPatch(body.text || "");
+      if (patch) session.patch(patch);
       const reply = await think({
         config,
         session: session.snapshot(),
         recent: [],
         utterance: body.text || "",
-        preferredLang: lang,
+        preferredLang: lang === "en" ? "en" : "fa",
       });
-      json(res, 200, { reply });
+      json(res, 200, { reply, session: session.snapshot() });
     } catch (err) {
       json(res, 400, { error: err instanceof Error ? err.message : "bad request" });
     }

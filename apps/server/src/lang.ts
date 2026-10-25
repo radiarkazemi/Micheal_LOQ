@@ -7,9 +7,9 @@ const PERSIAN_RE =
 
 export function detectLang(text: string | undefined | null): Lang {
   const t = (text ?? "").trim();
-  if (!t) return "en";
+  // Empty / wake → Persian-first (Micheal default)
+  if (!t) return "fa";
   if (PERSIAN_RE.test(t)) return "fa";
-  // Common romanized Persian greetings / trading words
   if (/\b(salam|salaam|khoobi|chetori|mamnoon|merci|dorost|bale|na)\b/i.test(t)) {
     return "fa";
   }

@@ -25,6 +25,17 @@ export function observeAmbient(opts: {
   // Keep mic free: only rare high-priority spoken nudges (text-only otherwise)
   if (quietMs < 120_000) return null;
 
+  if (!session.symbol || !session.timeframe) {
+    if (quietMs < 180_000) return null;
+    return {
+      priority: "normal",
+      speak: false,
+      text: fa
+        ? "هنوز با هم نماد و تایم‌فریم رو قفل نکردیم. هر وقت آماده‌ای بگو تا شروع کنیم."
+        : "We still haven't locked symbol and timeframe together. Say them when you're ready.",
+    };
+  }
+
   const hops = session.symbolSwitches + session.timeframeSwitches;
   if (hops >= 4) {
     return {

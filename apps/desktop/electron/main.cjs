@@ -1,10 +1,18 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session } = require("electron");
+const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, systemPreferences } = require("electron");
 const path = require("node:path");
 
 const isDev = !app.isPackaged;
 const DEV_URL = process.env.VITE_DEV_SERVER_URL || "http://127.0.0.1:5174";
 const CLOUD_HUD =
   process.env.MICHEAL_CLOUD_HUD || "http://91.107.171.162:8787/";
+
+// CRITICAL: Chromium blocks mic/SpeechRecognition on plain http origins.
+// Treat the Germany HUD as a secure origin so ears work in the Windows app.
+app.commandLine.appendSwitch(
+  "unsafely-treat-insecure-origin-as-secure",
+  "http://91.107.171.162:8787,http://127.0.0.1:5174,http://localhost:5174",
+);
+app.commandLine.appendSwitch("allow-insecure-localhost");
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -41,7 +49,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
+      autoplayPolicy: "no-user-required",
     },
   });
 
@@ -54,7 +63,6 @@ function createWindow() {
     return { action: "deny" };
   });
 
-  // Prefer live cloud HUD so Windows always mirrors the Germany brain.
   const target = isDev ? DEV_URL : CLOUD_HUD;
   void mainWindow.loadURL(target).catch(() => {
     if (!isDev) {
@@ -106,10 +114,32 @@ function createTray() {
   tray.on("double-click", () => showWindow());
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === "media" || permission === "mediaKeySystem" || permission === "notifications");
+    callback(
+      permission === "media" ||
+        permission === "mediaKeySystem" ||
+        permission === "notifications" ||
+        permission === "clipboard-sanitized-write",
+    );
   });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    return (
+      permission === "media" ||
+      permission === "mediaKeySystem" ||
+      permission === "notifications" ||
+      permission === "clipboard-sanitized-write"
+    );
+  });
+
+  // Windows: ask OS mic access early (helps SpeechRecognition)
+  try {
+    if (process.platform === "darwin" && systemPreferences?.askForMediaAccess) {
+      await systemPreferences.askForMediaAccess("microphone");
+    }
+  } catch {
+    /* ignore */
+  }
 
   createWindow();
   createTray();
@@ -129,6 +159,5 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
-  // Keep tray alive on Windows/Linux — only quit via tray menu.
   if (process.platform === "darwin") app.quit();
 });
