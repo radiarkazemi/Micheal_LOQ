@@ -188,6 +188,9 @@ const server = createServer(async (req, res) => {
       clients: clients.size,
       hud: existsSync(join(HUD_DIR, "index.html")),
       jarvis: true,
+      downloadDir: DOWNLOAD_DIR,
+      setupExe: existsSync(join(DOWNLOAD_DIR, "Micheal-Setup.exe")),
+      setupZip: existsSync(join(DOWNLOAD_DIR, "Micheal-Windows.zip")),
       time: Date.now(),
     });
     return;
@@ -247,7 +250,10 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && (url.pathname === "/download" || url.pathname === "/download/")) {
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    (url.pathname === "/download" || url.pathname === "/download/")
+  ) {
     const html = `<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"/><title>Micheal Download</title>
 <style>body{font-family:Tahoma,sans-serif;background:#0b0f18;color:#e8eef8;padding:40px;line-height:1.7}
 a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#121826;padding:28px;border-radius:16px}
@@ -261,11 +267,12 @@ small{color:#9aa8c0}</style>
 </div>`;
     cors(res);
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
-    res.end(html);
+    if (req.method === "HEAD") res.end();
+    else res.end(html);
     return;
   }
 
-  if (req.method === "GET" && url.pathname.startsWith("/download/")) {
+  if ((req.method === "GET" || req.method === "HEAD") && url.pathname.startsWith("/download/")) {
     const rel = url.pathname.slice("/download/".length);
     const file = safeJoin(DOWNLOAD_DIR, rel);
     if (file && existsSync(file) && statSync(file).isFile()) {
@@ -281,6 +288,10 @@ small{color:#9aa8c0}</style>
         "Content-Disposition": `attachment; filename="${name}"`,
         "Cache-Control": "public, max-age=60",
       });
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
       createReadStream(file).pipe(res);
       return;
     }
