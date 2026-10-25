@@ -247,11 +247,41 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && (url.pathname === "/download" || url.pathname === "/download/")) {
+    const html = `<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"/><title>Micheal Download</title>
+<style>body{font-family:Tahoma,sans-serif;background:#0b0f18;color:#e8eef8;padding:40px;line-height:1.7}
+a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#121826;padding:28px;border-radius:16px}
+small{color:#9aa8c0}</style>
+<div class="box"><h1>نصب Micheal روی ویندوز</h1>
+<p>اگر ویندوز لینک مستقیم سرور را بلاک کرد، از <b>GitHub (HTTPS)</b> دانلود کن:</p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.1-mic-fix/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.1-mic-fix/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
+<p><a href="/download/Micheal-Windows.zip">ZIP از همین سرور</a> · <a href="/download/Micheal-Setup.exe">EXE از همین سرور</a></p>
+<small>اگر SmartScreen آمد: More info → Run anyway. میکروفون را Allow کن.</small>
+</div>`;
+    cors(res);
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" });
+    res.end(html);
+    return;
+  }
+
   if (req.method === "GET" && url.pathname.startsWith("/download/")) {
     const rel = url.pathname.slice("/download/".length);
     const file = safeJoin(DOWNLOAD_DIR, rel);
     if (file && existsSync(file) && statSync(file).isFile()) {
-      sendFile(res, file, "public, max-age=60");
+      const ext = extname(file).toLowerCase();
+      const type =
+        ext === ".zip" ? "application/zip" : ext === ".exe" ? "application/octet-stream" : MIME[ext] || "application/octet-stream";
+      const stat = statSync(file);
+      const name = rel.split("/").pop() || "download";
+      cors(res);
+      res.writeHead(200, {
+        "Content-Type": type,
+        "Content-Length": stat.size,
+        "Content-Disposition": `attachment; filename="${name}"`,
+        "Cache-Control": "public, max-age=60",
+      });
+      createReadStream(file).pipe(res);
       return;
     }
     json(res, 404, { error: "download not found" });
