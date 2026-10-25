@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local Persian STT for Micheal — Electron cannot use Chrome Web Speech."""
+"""Micheal STT — bilingual Whisper (fa/en auto)."""
 
 from __future__ import annotations
 
@@ -14,26 +14,42 @@ from faster_whisper import WhisperModel
 
 HOST = os.environ.get("MICHEAL_STT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MICHEAL_STT_PORT", "8791"))
-MODEL_NAME = os.environ.get("MICHEAL_STT_MODEL", "tiny")
+# base >> tiny for Persian; still OK on 2 vCPU / 4GB
+MODEL_NAME = os.environ.get("MICHEAL_STT_MODEL", "base")
 TOKEN = os.environ.get("MICHEAL_TOKEN", "").strip()
+INITIAL = (
+    "Micheal trading Jarvis. Persian فارسی and English. "
+    "طلا XAUUSD یورو دلار EURUSD پوند GBPUSD تایم فریم پانزده شصت. "
+    "Hey Micheal هی میشل."
+)
 
 print(f"[micheal-stt] loading model={MODEL_NAME} …", flush=True)
 MODEL = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
 print("[micheal-stt] ready", flush=True)
 
 
-def transcribe(path: str, language: str | None) -> str:
-    segments, _info = MODEL.transcribe(
+def transcribe(path: str, language: str | None) -> tuple[str, str | None]:
+    # language=None → auto detect fa/en
+    lang = None if not language or language in ("auto", "mixed") else language
+    segments, info = MODEL.transcribe(
         path,
-        language=language or "fa",
+        language=lang,
+        task="transcribe",
         vad_filter=True,
-        beam_size=1,
+        vad_parameters=dict(min_silence_duration_ms=400),
+        beam_size=3,
+        best_of=3,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        initial_prompt=INITIAL,
     )
-    return " ".join(seg.text.strip() for seg in segments).strip()
+    text = " ".join(seg.text.strip() for seg in segments).strip()
+    detected = getattr(info, "language", None)
+    return text, detected
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, fmt: str, *args) -> None:  # quieter
+    def log_message(self, fmt: str, *args) -> None:
         print(f"[micheal-stt] {self.address_string()} {fmt % args}", flush=True)
 
     def _auth_ok(self) -> bool:
@@ -42,13 +58,13 @@ class Handler(BaseHTTPRequestHandler):
         auth = self.headers.get("Authorization", "")
         if auth.lower().startswith("bearer ") and auth[7:].strip() == TOKEN:
             return True
-        if self.headers.get("X-Micheal-Token", "") == TOKEN:
-            return True
-        return False
+        return self.headers.get("X-Micheal-Token", "") == TOKEN
 
     def do_GET(self) -> None:
         if self.path.startswith("/health"):
-            body = json.dumps({"ok": True, "service": "micheal-stt", "model": MODEL_NAME}).encode()
+            body = json.dumps(
+                {"ok": True, "service": "micheal-stt", "model": MODEL_NAME, "bilingual": True}
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -70,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         raw = self.rfile.read(length)
         ctype = (self.headers.get("Content-Type") or "").lower()
-        lang = self.headers.get("X-Micheal-Lang") or "fa"
+        lang_hdr = (self.headers.get("X-Micheal-Lang") or "auto").strip().lower()
         suffix = ".webm"
         if "wav" in ctype:
             suffix = ".wav"
@@ -87,8 +103,11 @@ class Handler(BaseHTTPRequestHandler):
             os.close(fd)
             tmp = Path(name)
             tmp.write_bytes(raw)
-            text = transcribe(str(tmp), lang if lang != "auto" else None)
-            body = json.dumps({"ok": True, "text": text, "lang": lang}, ensure_ascii=False).encode("utf-8")
+            text, detected = transcribe(str(tmp), lang_hdr)
+            body = json.dumps(
+                {"ok": True, "text": text, "lang": detected or lang_hdr, "model": MODEL_NAME},
+                ensure_ascii=False,
+            ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

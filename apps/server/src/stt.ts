@@ -8,7 +8,7 @@ export async function transcribeAudio(opts: {
   readonly body: Buffer;
   readonly contentType: string;
   readonly lang?: string;
-}): Promise<{ text: string } | { error: string }> {
+}): Promise<{ text: string; lang?: string } | { error: string }> {
   const url = new URL(STT_URL);
   return new Promise((resolve) => {
     const req = httpRequest(
@@ -22,9 +22,9 @@ export async function transcribeAudio(opts: {
           "Content-Length": opts.body.length,
           Authorization: `Bearer ${opts.token}`,
           "X-Micheal-Token": opts.token,
-          "X-Micheal-Lang": opts.lang || "fa",
+          "X-Micheal-Lang": opts.lang || "auto",
         },
-        timeout: 60_000,
+        timeout: 90_000,
       },
       (res: IncomingMessage) => {
         const chunks: Buffer[] = [];
@@ -32,9 +32,15 @@ export async function transcribeAudio(opts: {
         res.on("end", () => {
           const raw = Buffer.concat(chunks).toString("utf8");
           try {
-            const data = JSON.parse(raw) as { ok?: boolean; text?: string; error?: string };
-            if (data.ok && typeof data.text === "string") resolve({ text: data.text });
-            else resolve({ error: data.error || "stt failed" });
+            const data = JSON.parse(raw) as {
+              ok?: boolean;
+              text?: string;
+              error?: string;
+              lang?: string;
+            };
+            if (data.ok && typeof data.text === "string") {
+              resolve({ text: data.text, lang: data.lang });
+            } else resolve({ error: data.error || "stt failed" });
           } catch {
             resolve({ error: `bad stt response (${res.statusCode})` });
           }

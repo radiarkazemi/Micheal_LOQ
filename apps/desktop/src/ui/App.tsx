@@ -3,6 +3,7 @@ import type { SessionState } from "@micheal/protocol";
 import { MichealCloud } from "@/cloud";
 import { loadConfig } from "@/config";
 import { createVoice } from "@/voice";
+import { WakeGate } from "@/wake";
 import "./styles.css";
 
 const TIMEFRAMES = ["1", "5", "15", "60", "240", "D"] as const;
@@ -23,17 +24,27 @@ function hasPersian(text: string): boolean {
   return PERSIAN_RE.test(text);
 }
 
+function isNoiseTranscript(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 2) return true;
+  // Whisper hallucinations on silence / noise
+  if (/^(thank you|thanks|you|the end|subtitle|subscribe|\.+|…+)$/i.test(t)) return true;
+  if (/^(موسیقی|زیرنویس|تشکر)$/i.test(t)) return true;
+  return false;
+}
+
 export function App() {
   const voice = useMemo(() => createVoice(), []);
+  const wake = useMemo(() => new WakeGate(75_000), []);
   const [cfg, setCfg] = useState<{ url: string; token: string } | null>(null);
-  const [, setUiLang] = useState<"en" | "fa">("fa");
   const [heard, setHeard] = useState("");
   const [micMsg, setMicMsg] = useState<string | null>(null);
-  const [micArmed, setMicArmed] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
+  const [earsOn, setEarsOn] = useState(false);
   const [level, setLevel] = useState(0);
+  const [phase, setPhase] = useState<"boot" | "listening" | "thinking" | "speaking" | "sleep">("boot");
   const busyRef = useRef(false);
+  const speakingRef = useRef(false);
+  const cloudRef = useRef<MichealCloud | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,8 +58,19 @@ export function App() {
 
   const cloud = useMemo(() => {
     if (!cfg?.token) return null;
-    return new MichealCloud(cfg.url, cfg.token, (text) => voice.speak(text));
-  }, [voice, cfg]);
+    const c = new MichealCloud(cfg.url, cfg.token, async (text) => {
+      setPhase("speaking");
+      voice.setPaused(true);
+      await voice.speak(text, {
+        cloudSpeak: (t, lang) => c.fetchSpeech(t, lang),
+      });
+      voice.setPaused(false);
+      wake.keepAlive();
+      setPhase(wake.isConversationOpen ? "listening" : "sleep");
+    });
+    cloudRef.current = c;
+    return c;
+  }, [voice, cfg, wake]);
 
   const state = useSyncExternalStore(
     (cb) => (cloud ? cloud.subscribe(cb) : () => undefined),
@@ -70,105 +92,120 @@ export function App() {
   }, [cloud]);
 
   useEffect(() => {
+    speakingRef.current = state.speaking;
+  }, [state.speaking]);
+
+  useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.messages]);
 
+  // Always-on Jarvis ears once connected
+  useEffect(() => {
+    if (!cloud || !connected || !voice.supported.media) return;
+    let cancelled = false;
+
+    const start = async () => {
+      try {
+        await voice.startJarvisEars({
+          onLevel: setLevel,
+          shouldListen: () => !busyRef.current && !speakingRef.current && !voice.isPaused(),
+          onUtterance: async (blob) => {
+            if (cancelled || busyRef.current) return;
+            busyRef.current = true;
+            voice.setPaused(true);
+            setPhase("thinking");
+            cloud.setListening(true);
+            try {
+              const text = await cloud.transcribe(blob, "auto");
+              if (isNoiseTranscript(text)) {
+                setMicMsg(null);
+                return;
+              }
+              setHeard(text);
+              const gate = wake.handle(text);
+              if (!gate.awake) {
+                setMicMsg(`شنیدم ولی بیدار نیستم — بگو «هی میشل» / Hey Micheal`);
+                setPhase("sleep");
+                return;
+              }
+              if (gate.wokeNow && !gate.command) {
+                setMicMsg(null);
+                cloud.chat(hasPersian(text) ? "سلام میشل" : "Hey Micheal");
+                return;
+              }
+              setMicMsg(null);
+              setPhase("thinking");
+              cloud.chat(gate.command || text);
+            } catch (err) {
+              setMicMsg(err instanceof Error ? err.message : "خطای شنود");
+            } finally {
+              cloud.setListening(false);
+              // keep paused until TTS speak path clears it; if no speak, clear
+              window.setTimeout(() => {
+                if (!cloudRef.current?.getState().speaking) {
+                  voice.setPaused(false);
+                  busyRef.current = false;
+                  setPhase(wake.isConversationOpen ? "listening" : "sleep");
+                } else {
+                  busyRef.current = false;
+                }
+              }, 400);
+            }
+          },
+        });
+        if (!cancelled) {
+          setEarsOn(true);
+          setPhase("sleep");
+          setMicMsg("همیشه شنوا — بگو «هی میشل» یا Hey Micheal");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setEarsOn(false);
+          setMicMsg(
+            err instanceof Error
+              ? err.message
+              : "میکروفون بسته است. Settings → Privacy → Microphone را برای Micheal روشن کن.",
+          );
+        }
+      }
+    };
+
+    void start();
+    return () => {
+      cancelled = true;
+      voice.stopJarvisEars();
+      setEarsOn(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- start once per connection
+  }, [cloud, connected, voice, wake]);
+
   const boardReady = Boolean(session?.symbol && session?.timeframe);
-  const orbClass = ["orb", state.speaking ? "speaking" : "", recording || transcribing ? "listening" : ""]
+  const orbClass = [
+    "orb",
+    state.speaking || phase === "speaking" ? "speaking" : "",
+    earsOn && phase !== "sleep" ? "listening" : "",
+  ]
     .filter(Boolean)
     .join(" ");
 
-  const caption = !state.connected
-    ? "اتصال به مغز ابری…"
-    : state.speaking
+  const caption =
+    phase === "speaking" || state.speaking
       ? "در حال صحبت…"
-      : transcribing
-        ? "در حال فهمیدن صدا…"
-        : recording
-          ? "دارم ضبط می‌کنم — دوباره بزن تا بفرستم"
-          : "آماده — دکمه میک را بزن و حرف بزن";
-
-  const armMic = async (): Promise<boolean> => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      for (const t of stream.getTracks()) t.stop();
-      setMicArmed(true);
-      setMicMsg(null);
-      return true;
-    } catch {
-      setMicArmed(false);
-      setMicMsg(
-        "ویندوز میکروفون را بسته. Settings → Privacy & security → Microphone → Micheal / Desktop apps را روشن کن، بعد دوباره بزن.",
-      );
-      return false;
-    }
-  };
-
-  const toggleTalk = async () => {
-    if (!cloud || busyRef.current || transcribing) return;
-    if (!voice.supported.media) {
-      setMicMsg("این محیط ضبط صدا ندارد. از کامپیوتر ویندوز با اپ جدید استفاده کن.");
-      return;
-    }
-
-    if (!recording) {
-      const ok = micArmed || (await armMic());
-      if (!ok) return;
-      try {
-        await voice.startRecording((lv) => setLevel(lv));
-        setRecording(true);
-        cloud.setListening(true);
-        setHeard("");
-        setMicMsg("حرف بزن… وقتی تموم شد دوباره همین دکمه را بزن.");
-      } catch (err) {
-        setMicMsg(err instanceof Error ? err.message : "شروع ضبط نشد");
-        setRecording(false);
-        cloud.setListening(false);
-      }
-      return;
-    }
-
-    // Stop → upload → chat
-    busyRef.current = true;
-    setRecording(false);
-    setTranscribing(true);
-    cloud.setListening(false);
-    setMicMsg("دارم صدایت را می‌فرستم به آلمان…");
-    try {
-      const blob = await voice.stopRecording();
-      setLevel(0);
-      if (!blob.size || blob.size < 800) {
-        setMicMsg("خیلی کوتاه بود — دوباره بزن، یک‌ثانیه حرف بزن، بعد دوباره بزن.");
-        return;
-      }
-      const text = await cloud.transcribe(blob, "fa");
-      if (!text) {
-        setMicMsg("چیزی نفهمیدم — واضح‌تر و کمی بلندتر بگو.");
-        return;
-      }
-      setHeard(text);
-      setMicMsg(null);
-      setUiLang("fa");
-      cloud.chat(text);
-    } catch (err) {
-      setMicMsg(
-        err instanceof Error
-          ? `میک/STT: ${err.message}`
-          : "ارسال صدا شکست خورد — اتصال به سرور را چک کن.",
-      );
-    } finally {
-      setTranscribing(false);
-      busyRef.current = false;
-    }
-  };
+      : phase === "thinking"
+        ? "دارم می‌فهمم…"
+        : phase === "listening" || wake.isConversationOpen
+          ? "بیدارم — حرف بزن"
+          : earsOn
+            ? "خواب سبک — بگو هی میشل"
+            : "در انتظار میکروفون…";
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !cloud) return;
-    setUiLang("fa");
     setDraft("");
+    wake.keepAlive();
     cloud.chat(text);
   };
 
@@ -199,7 +236,7 @@ export function App() {
       <header className="topbar">
         <div>
           <div className="brand-mark">MICHEAL</div>
-          <div className="brand-sub">جارویس معاملاتی · میک واقعی · فارسی</div>
+          <div className="brand-sub">هی میشل · همیشه شنوا · فارسی / English</div>
         </div>
         <div className="pills">
           <span className="pill">
@@ -207,12 +244,9 @@ export function App() {
             {state.live ? "زنده" : "وصل…"}
           </span>
           <span className="pill">
-            <span className={`dot ${recording || transcribing ? "warn" : micArmed ? "on" : ""}`} />
-            {transcribing ? "فهم صدا" : recording ? "ضبط" : micArmed ? "میک آماده" : "میک قطع"}
+            <span className={`dot ${earsOn ? (wake.isConversationOpen ? "warn" : "on") : ""}`} />
+            {!earsOn ? "میک قطع" : wake.isConversationOpen ? "بیدار" : "منتظر wake"}
           </span>
-          <button type="button" className="chip" onClick={() => void armMic()}>
-            فعال‌سازی میک
-          </button>
         </div>
       </header>
 
@@ -230,34 +264,22 @@ export function App() {
               {heard
                 ? `شنیدم: ${heard}`
                 : boardReady
-                  ? `با هم روی ${session!.symbol} · ${session!.timeframe}. دکمه میک = ضبط واقعی (نه Web Speech شکسته).`
-                  : "هیچ پیش‌فرضی نیست. میک را بزن و بگو مثلاً «طلا پانزده»."}
+                  ? `با هم روی ${session!.symbol} · ${session!.timeframe}. مثل جارویس — بدون دکمه.`
+                  : "هیچ پیش‌فرضی نیست. بگو «هی میشل، طلا پانزده»."}
             </p>
             <div className="level" aria-hidden>
               <div className="level-fill" style={{ width: `${Math.round(level * 100)}%` }} />
             </div>
-            <button
-              type="button"
-              className={`btn talk ${recording ? "on" : ""} ${transcribing ? "busy" : ""}`}
-              onClick={() => void toggleTalk()}
-              disabled={!connected || transcribing}
-            >
-              {transcribing
-                ? "…در حال فهمیدن"
-                : recording
-                  ? "توقف و ارسال"
-                  : "بزن و حرف بزن"}
-            </button>
             {micMsg ? <p className="hint danger">{micMsg}</p> : null}
             <p className="hint">
-              یک‌بار بزن → حرف بزن (نوار سبز باید حرکت کند) → دوباره بزن تا بفرستد. اگر نوار حرکت نکرد، میک ویندوز بسته است.
+              Wake: «هی میشل» / Hey Micheal — بعدش ۷۵ ثانیه بدون wake حرف بزن. نوار سبز = گوش فعال.
             </p>
           </div>
         </section>
 
         <aside className="side">
           <section className="panel">
-            <h3>فید جلسه — با هم می‌چینیم</h3>
+            <h3>فید جلسه</h3>
             <div className="grid2">
               <div className="field">
                 <label htmlFor="symbol">نماد</label>
@@ -335,7 +357,7 @@ export function App() {
                   cloud?.setVoiceEnabled(next);
                 }}
               >
-                {state.voiceEnabled ? "صدا روشن" : "صدا خاموش"}
+                {state.voiceEnabled ? "پاسخ صوتی روشن" : "پاسخ صوتی خاموش"}
               </button>
             </div>
           </section>
@@ -360,7 +382,7 @@ export function App() {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="یا اینجا بنویس — مثلاً طلا پانزده"
+                placeholder="اختیاری — معمولاً فقط حرف بزن"
                 aria-label="Message"
                 dir="rtl"
               />

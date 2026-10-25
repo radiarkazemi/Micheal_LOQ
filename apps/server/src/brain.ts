@@ -1,6 +1,7 @@
 import type { ChatMessage, SessionState } from "@micheal/protocol";
 import type { ServerConfig } from "./config.js";
 import { detectLang, type Lang } from "./lang.js";
+import type { DialogueMemory } from "./memory.js";
 
 export interface BrainReply {
   readonly text: string;
@@ -9,17 +10,17 @@ export interface BrainReply {
 }
 
 const JARVIS_SYSTEM = `You are Micheal — a Jarvis-like trading companion on the trader's private cloud (Germany).
-Personality: calm, precise, lightly witty, loyal. Address the trader as a respected partner.
+Personality: calm, precise, lightly witty, loyal, continuously aware of the conversation.
+You remember what was just said and stay in the flow like a real partner — not a FAQ bot.
 You help with focus, risk hygiene, and seeing what they might miss. You are NOT a signal service and never guarantee profits.
-Keep spoken replies short (1–3 sentences) unless asked for detail.
+Keep spoken replies short (1–3 sentences) unless asked for detail. Always sound speakable out loud.
 Never hype entries. Prefer questions and observations. Protect the account and the trader's focus.
-Your name is Micheal (میشل). If asked who you are, say Micheal / میشل.
+Your name is Micheal (میشل). Wake phrase: "Hey Micheal" / «هی میشل».
 
 Language rule (critical):
-- Detect the user's language. If they write in Persian/Farsi (فارسی), reply entirely in clear, natural Persian.
-- If they write in English, reply in English.
-- Match the user's language every turn. Do not mix languages unless they mix first.
-- Persian should feel native (not literal translation), trading terms may stay as XAUUSD / TF when natural.`;
+- Detect the user's language every turn. Persian → full natural فارسی. English → English.
+- Match the user. Do not mix unless they mix first.
+- Trading tickers (XAUUSD, TF) may stay Latin when natural.`;
 
 export async function think(opts: {
   readonly config: ServerConfig;
@@ -27,15 +28,18 @@ export async function think(opts: {
   readonly recent: readonly ChatMessage[];
   readonly utterance?: string;
   readonly preferredLang?: Lang;
+  readonly memory?: DialogueMemory;
 }): Promise<BrainReply> {
-  // Persian-first: keep FA unless user clearly wrote English-only
   const detected = detectLang(opts.utterance);
   const lang: Lang =
-    opts.preferredLang === "en" && detected === "en"
+    detected === "en" && !/[\u0600-\u06FF]/.test(opts.utterance ?? "") && (opts.utterance ?? "").trim().length > 0
       ? "en"
-      : detected === "en" && !/[\u0600-\u06FF]/.test(opts.utterance ?? "") && (opts.utterance ?? "").trim().length > 0
-        ? "en"
+      : detected === "fa"
+        ? "fa"
         : opts.preferredLang ?? "fa";
+
+  opts.memory?.fromHistory(opts.recent);
+
   if (opts.config.openaiApiKey) {
     try {
       return await openaiThink({ ...opts, lang });
@@ -43,7 +47,7 @@ export async function think(opts: {
       console.warn("[micheal] openai failed, falling back:", err instanceof Error ? err.message : err);
     }
   }
-  return heuristicThink(opts.session, opts.utterance, lang);
+  return heuristicThink(opts.session, opts.utterance, lang, opts.memory, opts.recent);
 }
 
 async function openaiThink(opts: {
@@ -52,16 +56,20 @@ async function openaiThink(opts: {
   readonly recent: readonly ChatMessage[];
   readonly utterance?: string;
   readonly lang: Lang;
+  readonly memory?: DialogueMemory;
 }): Promise<BrainReply> {
-  const { config, session, recent, utterance, lang } = opts;
-  const context = `Session: ${session.symbol} TF=${session.timeframe} price=${session.price ?? "n/a"} bias=${session.bias} focus=${session.focusMode}
+  const { config, session, recent, utterance, lang, memory } = opts;
+  const mem = memory?.contextLine(lang === "fa") || "";
+  const context = `Session: symbol=${session.symbol || "(unset)"} TF=${session.timeframe || "(unset)"} price=${session.price ?? "n/a"} bias=${session.bias} focus=${session.focusMode}
 Plan/note: ${session.note || "none"}
-Hop counts (3m window): symbols=${session.symbolSwitches} timeframes=${session.timeframeSwitches}
-Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}`;
+Hop counts (3m): symbols=${session.symbolSwitches} timeframes=${session.timeframeSwitches}
+Working memory: ${mem || "fresh session"}
+Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}
+Be continuous and conscious of prior turns. Spoken length: 1–3 sentences.`;
 
   const messages = [
     { role: "system", content: `${JARVIS_SYSTEM}\n${context}` },
-    ...recent.slice(-8).map((m) => ({
+    ...recent.slice(-12).map((m) => ({
       role: m.role === "you" ? "user" : "assistant",
       content: m.text,
     })),
@@ -70,8 +78,8 @@ Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}`;
       content:
         utterance?.trim() ||
         (lang === "fa"
-          ? "با یک خوش‌آمدگویی کوتاه جلسه را باز کن."
-          : "Greet me briefly as I open the session."),
+          ? "با یک خوش‌آمدگویی کوتاه بگو آماده‌ای و با «هی میشل» بیدار می‌شی."
+          : "Greet briefly — say you're ready and wake on Hey Micheal."),
     },
   ];
 
@@ -83,8 +91,8 @@ Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}`;
     },
     body: JSON.stringify({
       model: config.openaiModel,
-      temperature: 0.55,
-      max_tokens: 260,
+      temperature: 0.5,
+      max_tokens: 220,
       messages,
     }),
   });
@@ -102,10 +110,17 @@ Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}`;
   return { text, speak: true, lang };
 }
 
-function heuristicThink(session: SessionState, utterance: string | undefined, lang: Lang): BrainReply {
+function heuristicThink(
+  session: SessionState,
+  utterance: string | undefined,
+  lang: Lang,
+  memory?: DialogueMemory,
+  recent?: readonly ChatMessage[],
+): BrainReply {
   const raw = (utterance ?? "").trim();
   const q = raw.toLowerCase();
   const fa = lang === "fa";
+  const mood = memory?.moodHint(fa);
 
   if (!raw) {
     const ready = Boolean(session.symbol && session.timeframe);
@@ -114,12 +129,20 @@ function heuristicThink(session: SessionState, utterance: string | undefined, la
       lang,
       text: fa
         ? ready
-          ? `میشل آنلاینه. با هم روی ${session.symbol} تایم‌فریم ${session.timeframe} هستیم. حرف بزن — گوش می‌دم.`
-          : `میشل آنلاینه. هیچ پیش‌فرضی ندارم — با هم انتخاب می‌کنیم. امروز چه نماد و چه تایم‌فریمی؟ مثلاً بگو «طلا پانزده» یا «یورو دلار یک ساعت».`
+          ? `میشل اینجاست. روی ${session.symbol} تایم‌فریم ${session.timeframe}. بگو «هی میشل» یا ادامه بده — همیشه گوش می‌دم.`
+          : `میشل اینجاست، همیشه شنوا. بگو «هی میشل»، بعد نماد و تایم‌فریم رو با هم انتخاب می‌کنیم. مثلاً «طلا پانزده».`
         : ready
-          ? `Micheal online. We're on ${session.symbol} ${session.timeframe} together. Speak — I'm listening.`
-          : `Micheal online. No defaults — we choose together. What symbol and timeframe today? Say e.g. "gold fifteen" or "EURUSD one hour".`,
+          ? `Micheal here. On ${session.symbol} ${session.timeframe}. Say Hey Micheal or just continue — I'm always listening.`
+          : `Micheal here, always listening. Say Hey Micheal, then we choose symbol and timeframe together.`,
     };
+  }
+
+  // Chart just locked via speech
+  if (session.symbol && session.timeframe && extractHasChartIntent(raw)) {
+    const base = fa
+      ? `باشه — قفل شد: ${session.symbol} تایم‌فریم ${session.timeframe}. کنارت هستم. پلن یا بایاس چیه؟`
+      : `Locked in — ${session.symbol} on ${session.timeframe}. I'm with you. What's the plan or bias?`;
+    return { speak: true, lang, text: mood ? `${base} ${mood}` : base };
   }
 
   if (
@@ -267,17 +290,22 @@ function heuristicThink(session: SessionState, utterance: string | undefined, la
       speak: true,
       lang,
       text: fa
-        ? `گرفتم. اول با هم چارچوب رو ببندیم — نماد و تایم‌فریم چی باشه؟ بعدش کنارت می‌مونم.`
-        : `Got it. First let's lock the frame together — symbol and timeframe? Then I stay with you.`,
+        ? `گرفتم${recent && recent.length ? " و ادامه می‌دم از همون‌جا" : ""}. اول چارچوب — نماد و تایم‌فریم چی باشه؟`
+        : `Got it${recent && recent.length ? " — staying in the thread" : ""}. First the frame — symbol and timeframe?`,
     };
   }
 
+  if (mood) {
+    return { speak: true, lang, text: mood };
+  }
+
+  const memBit = memory?.contextLine(fa);
   return {
     speak: true,
     lang,
     text: fa
-      ? `فهمیدم. روی ${session.symbol} ${session.timeframe} کنارت هستم. بپرس چی می‌بینم، یا قیمت و بایاس رو آپدیت کن تا درست مراقبت کنم.`
-      : `Understood. On ${session.symbol} ${session.timeframe} — I'm with you. Ask what I'm seeing, or update price and bias so I can watch properly.`,
+      ? `فهمیدم. روی ${session.symbol} ${session.timeframe} باهات هستم${memBit ? " و رشته‌ی حرفمون رو دارم" : ""}. بگو چی می‌خوای ببینم یا پلن رو.`
+      : `Understood. On ${session.symbol} ${session.timeframe} with you${memBit ? ", holding the thread" : ""}. Tell me what to watch or state the plan.`,
   };
 }
 

@@ -9,9 +9,11 @@ import { think } from "./brain.js";
 import { loadConfig } from "./config.js";
 import { detectLang } from "./lang.js";
 import { extractSessionPatch } from "./intent.js";
+import { DialogueMemory } from "./memory.js";
 import { observeAmbient } from "./observe.js";
 import { TradingSession } from "./session.js";
 import { readRawBody, transcribeAudio } from "./stt.js";
+import { proxySpeak } from "./tts.js";
 
 const config = loadConfig();
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -27,6 +29,7 @@ const DOWNLOAD_DIR = resolve(
 interface ClientCtx {
   readonly ws: WebSocket;
   readonly session: TradingSession;
+  readonly memory: DialogueMemory;
   messages: ChatMessage[];
   authed: boolean;
   lastPongAt: number;
@@ -96,8 +99,10 @@ async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
     recent: ctx.messages,
     utterance: trimmed,
     preferredLang: lang === "en" ? "en" : "fa",
+    memory: ctx.memory,
   });
-  pushMessage(ctx, "micheal", reply.text, reply.speak);
+  pushMessage(ctx, "micheal", reply.text, true);
+  ctx.memory.observe(trimmed, reply.text);
   ctx.lastSpokeAt = Date.now();
   send(ctx.ws, { type: "status", status: "online" });
 }
@@ -231,7 +236,7 @@ const server = createServer(async (req, res) => {
         json(res, 400, { error: "empty audio" });
         return;
       }
-      const lang = (url.searchParams.get("lang") || req.headers["x-micheal-lang"] || "fa").toString();
+      const lang = (url.searchParams.get("lang") || req.headers["x-micheal-lang"] || "auto").toString();
       const contentType = (req.headers["content-type"] || "audio/webm").toString();
       const result = await transcribeAudio({
         token: config.token,
@@ -243,9 +248,34 @@ const server = createServer(async (req, res) => {
         json(res, 503, { error: result.error });
         return;
       }
-      json(res, 200, { ok: true, text: result.text, lang });
+      json(res, 200, { ok: true, text: result.text, lang: result.lang || lang });
     } catch (err) {
       json(res, 400, { error: err instanceof Error ? err.message : "stt failed" });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/tts") {
+    try {
+      if (tokenFromReq(req) !== config.token) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const raw = await readBody(req);
+      const body = JSON.parse(raw || "{}") as { text?: string; lang?: string };
+      const text = (body.text || "").trim();
+      if (!text) {
+        json(res, 400, { error: "empty text" });
+        return;
+      }
+      await proxySpeak({
+        token: config.token,
+        text,
+        lang: body.lang === "en" ? "en" : "fa",
+        res,
+      });
+    } catch (err) {
+      json(res, 400, { error: err instanceof Error ? err.message : "tts failed" });
     }
     return;
   }
@@ -291,8 +321,8 @@ a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#
 small{color:#9aa8c0}</style>
 <div class="box"><h1>نصب Micheal روی ویندوز</h1>
 <p>اگر ویندوز لینک مستقیم سرور را بلاک کرد، از <b>GitHub (HTTPS)</b> دانلود کن:</p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.2-real-mic/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.2-real-mic/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.3-jarvis-wake/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.3-jarvis-wake/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
 <p><a href="/download/Micheal-Windows.zip">ZIP از همین سرور</a> · <a href="/download/Micheal-Setup.exe">EXE از همین سرور</a></p>
 <small>اگر SmartScreen آمد: More info → Run anyway. میکروفون را Allow کن.</small>
 </div>`;
@@ -343,6 +373,7 @@ wss.on("connection", (ws) => {
   const ctx: ClientCtx = {
     ws,
     session: new TradingSession(),
+    memory: new DialogueMemory(),
     messages: [],
     authed: false,
     lastPongAt: Date.now(),
@@ -381,8 +412,9 @@ wss.on("connection", (ws) => {
           session: ctx.session.snapshot(),
           recent: [],
           preferredLang: ctx.session.getLang(),
+          memory: ctx.memory,
         });
-        pushMessage(ctx, "micheal", greet.text, greet.speak);
+        pushMessage(ctx, "micheal", greet.text, true);
         ctx.lastSpokeAt = Date.now();
         return;
       }

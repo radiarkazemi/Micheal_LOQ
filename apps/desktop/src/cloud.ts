@@ -135,8 +135,8 @@ export class MichealCloud {
     this.send({ type: "chat", text });
   }
 
-  /** Upload recorded audio to Germany STT (Whisper). */
-  async transcribe(blob: Blob, lang: "fa" | "en" = "fa"): Promise<string> {
+  /** Upload recorded audio to Germany STT (Whisper, auto fa/en). */
+  async transcribe(blob: Blob, lang: "fa" | "en" | "auto" = "auto"): Promise<string> {
     const base = this.url.replace(/\/$/, "");
     const res = await fetch(`${base}/v1/stt?lang=${lang}`, {
       method: "POST",
@@ -144,6 +144,7 @@ export class MichealCloud {
         Authorization: `Bearer ${this.token}`,
         "X-Micheal-Token": this.token,
         "Content-Type": blob.type || "audio/webm",
+        "X-Micheal-Lang": lang,
       },
       body: blob,
     });
@@ -152,6 +153,27 @@ export class MichealCloud {
       throw new Error(data.error || `STT ${res.status}`);
     }
     return (data.text || "").trim();
+  }
+
+  /** Neural TTS from Germany (Edge voices) — returns playable audio element. */
+  async fetchSpeech(text: string, lang: "fa" | "en" = "fa"): Promise<HTMLAudioElement | null> {
+    const base = this.url.replace(/\/$/, "");
+    const res = await fetch(`${base}/v1/tts`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "X-Micheal-Token": this.token,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text, lang }),
+    });
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    if (!buf.byteLength) return null;
+    const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    return audio;
   }
 
   patchSession(patch: Partial<SessionState>): void {
