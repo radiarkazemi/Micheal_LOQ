@@ -28,7 +28,14 @@ export async function think(opts: {
   readonly utterance?: string;
   readonly preferredLang?: Lang;
 }): Promise<BrainReply> {
-  const lang = opts.preferredLang ?? detectLang(opts.utterance) ?? "en";
+  // Persian-first: keep FA unless user clearly wrote English-only
+  const detected = detectLang(opts.utterance);
+  const lang: Lang =
+    opts.preferredLang === "en" && detected === "en"
+      ? "en"
+      : detected === "en" && !/[\u0600-\u06FF]/.test(opts.utterance ?? "") && (opts.utterance ?? "").trim().length > 0
+        ? "en"
+        : opts.preferredLang ?? "fa";
   if (opts.config.openaiApiKey) {
     try {
       return await openaiThink({ ...opts, lang });

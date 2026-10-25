@@ -5,7 +5,6 @@ export interface Voice {
   speak(text: string): Promise<void>;
   stop(): void;
   listen(lang?: "en" | "fa"): Promise<string>;
-  /** Continuous Jarvis ears — keeps listening and streams final phrases. */
   startAmbient(opts: {
     lang?: "en" | "fa";
     onPartial?: (text: string) => void;
@@ -16,6 +15,8 @@ export interface Voice {
   setEnabled(on: boolean): void;
   isEnabled(): boolean;
   setListenLang(lang: "en" | "fa"): void;
+  /** Soft-pause ears during Micheal speech (no hear/see flicker). */
+  setPaused(paused: boolean): void;
 }
 
 export function createVoice(): Voice {
@@ -26,24 +27,23 @@ export function createVoice(): Voice {
   let listenLang: "en" | "fa" = "fa";
   let recognition: SpeechRecognition | null = null;
   let ambient = false;
+  let paused = false;
+  let speaking = false;
   let ambientOpts: Parameters<Voice["startAmbient"]>[0] | null = null;
   let restartTimer: number | null = null;
+  let earsReported = false;
+  let lastPhraseAt = 0;
+  let lastPhrase = "";
 
   const pickVoice = (text: string): SpeechSynthesisVoice | null => {
     const voices = window.speechSynthesis.getVoices();
-    const wantFa = PERSIAN_RE.test(text);
-    if (wantFa) {
-      return (
-        voices.find((v) => /fa/i.test(v.lang)) ??
-        voices.find((v) => /persian|farsi/i.test(v.name)) ??
-        voices.find((v) => /en-/i.test(v.lang)) ??
-        voices[0] ??
-        null
-      );
-    }
+    // Prefer Persian voices whenever possible (Micheal speaks FA)
     return (
-      voices.find((v) => /en-GB/i.test(v.lang) && /male|daniel|google uk/i.test(v.name)) ??
-      voices.find((v) => /en-GB/i.test(v.lang)) ??
+      voices.find((v) => /fa/i.test(v.lang)) ??
+      voices.find((v) => /persian|farsi/i.test(v.name)) ??
+      (PERSIAN_RE.test(text)
+        ? voices.find((v) => /en-/i.test(v.lang))
+        : voices.find((v) => /en-GB/i.test(v.lang) && /male|daniel|google uk/i.test(v.name))) ??
       voices.find((v) => /en-/i.test(v.lang)) ??
       voices[0] ??
       null
@@ -57,56 +57,111 @@ export function createVoice(): Voice {
     }
   };
 
+  const reportEars = (on: boolean) => {
+    if (earsReported === on) return;
+    earsReported = on;
+    ambientOpts?.onListening?.(on);
+  };
+
+  const shouldAcceptPhrase = (text: string): boolean => {
+    const t = text.trim();
+    if (t.length < 2) return false;
+    if (speaking || paused) return false;
+    const now = Date.now();
+    // Drop echo / duplicates right after Micheal spoke or same phrase
+    if (now - lastPhraseAt < 900 && t === lastPhrase) return false;
+    if (now - lastPhraseAt < 450) return false;
+    lastPhraseAt = now;
+    lastPhrase = t;
+    return true;
+  };
+
+  const scheduleRestart = (ms: number) => {
+    clearRestart();
+    restartTimer = window.setTimeout(() => {
+      restartTimer = null;
+      runAmbient();
+    }, ms);
+  };
+
+  const stopRec = (hard = false) => {
+    clearRestart();
+    const rec = recognition;
+    recognition = null;
+    if (!rec) return;
+    try {
+      if (hard) rec.abort();
+      else rec.stop();
+    } catch {
+      try {
+        rec.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
   const runAmbient = () => {
     if (!ambient || !enabled || !Recognition || !ambientOpts) return;
-    try {
-      recognition?.abort();
-    } catch {
-      /* ignore */
+    if (paused || speaking) {
+      reportEars(true); // still "armed" — no flicker to "seeing"
+      scheduleRestart(400);
+      return;
     }
+
+    stopRec(true);
+
     const use = ambientOpts.lang ?? listenLang;
     const rec = new Recognition();
     recognition = rec;
+    // Windows/Electron: single-utterance loop is far more stable than continuous=true
     rec.lang = use === "fa" ? "fa-IR" : "en-US";
     rec.interimResults = true;
-    rec.continuous = true;
-    ambientOpts.onListening?.(true);
+    rec.continuous = false;
+    reportEars(true);
 
     rec.onresult = (event) => {
+      if (speaking || paused) return;
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const row = event.results[i];
         const text = row?.[0]?.transcript?.trim() ?? "";
         if (!text) continue;
         if (row.isFinal) {
-          ambientOpts?.onPhrase(text);
+          if (shouldAcceptPhrase(text)) ambientOpts?.onPhrase(text);
         } else {
           interim = text;
         }
       }
-      if (interim) ambientOpts?.onPartial?.(interim);
+      if (interim && !speaking && !paused) ambientOpts?.onPartial?.(interim);
     };
 
-    rec.onerror = () => {
-      ambientOpts?.onListening?.(false);
-      if (!ambient) return;
-      clearRestart();
-      restartTimer = window.setTimeout(runAmbient, 600);
+    rec.onerror = (event) => {
+      recognition = null;
+      // "aborted" / "no-speech" are normal — keep ears armed, quiet restart
+      const err = event.error || "";
+      if (!ambient) {
+        reportEars(false);
+        return;
+      }
+      reportEars(true);
+      scheduleRestart(err === "not-allowed" ? 3000 : 500);
     };
 
     rec.onend = () => {
-      ambientOpts?.onListening?.(false);
       recognition = null;
-      if (!ambient) return;
-      clearRestart();
-      restartTimer = window.setTimeout(runAmbient, 250);
+      if (!ambient) {
+        reportEars(false);
+        return;
+      }
+      reportEars(true);
+      scheduleRestart(paused || speaking ? 500 : 280);
     };
 
     try {
       rec.start();
     } catch {
-      clearRestart();
-      restartTimer = window.setTimeout(runAmbient, 800);
+      scheduleRestart(700);
     }
   };
 
@@ -121,22 +176,41 @@ export function createVoice(): Voice {
       listenLang = lang;
       if (ambientOpts) ambientOpts = { ...ambientOpts, lang };
     },
+    setPaused(next) {
+      paused = next;
+      if (next) {
+        stopRec(true);
+        reportEars(true);
+      } else if (ambient) {
+        scheduleRestart(200);
+      }
+    },
     speak(text) {
       if (!enabled || !tts || !text.trim()) return Promise.resolve();
-      // Pause ambient briefly so Micheal doesn't hear himself
-      const wasAmbient = ambient;
-      if (wasAmbient) this.stopAmbient();
+      speaking = true;
+      paused = true;
+      stopRec(true);
+      reportEars(true);
       window.speechSynthesis.cancel();
       return new Promise((resolve) => {
         const utter = new SpeechSynthesisUtterance(text);
-        const voice = pickVoice(text);
-        if (voice) utter.voice = voice;
-        utter.lang = PERSIAN_RE.test(text) ? "fa-IR" : voice?.lang || "en-GB";
+        const v = pickVoice(text);
+        if (v) utter.voice = v;
+        // Always prefer Persian speech settings for Micheal
+        utter.lang = PERSIAN_RE.test(text) || listenLang === "fa" ? "fa-IR" : v?.lang || "en-GB";
         utter.rate = 0.98;
         utter.pitch = 0.92;
+        let finished = false;
         const done = () => {
-          if (wasAmbient && ambientOpts) this.startAmbient(ambientOpts);
-          resolve();
+          if (finished) return;
+          finished = true;
+          speaking = false;
+          // Hold pause briefly so STT doesn't echo Micheal's voice
+          window.setTimeout(() => {
+            paused = false;
+            if (ambient) scheduleRestart(150);
+            resolve();
+          }, 550);
         };
         utter.onend = done;
         utter.onerror = done;
@@ -145,31 +219,27 @@ export function createVoice(): Voice {
     },
     stop() {
       if (tts) window.speechSynthesis.cancel();
+      speaking = false;
+      paused = false;
       this.stopAmbient();
-      try {
-        recognition?.abort();
-      } catch {
-        /* ignore */
-      }
-      recognition = null;
+      stopRec(true);
     },
     startAmbient(opts) {
       if (!Recognition) return;
       ambientOpts = opts;
       ambient = true;
+      earsReported = false;
       clearRestart();
       runAmbient();
     },
     stopAmbient() {
       ambient = false;
       clearRestart();
-      try {
-        recognition?.abort();
-      } catch {
-        /* ignore */
+      stopRec(true);
+      if (earsReported) {
+        earsReported = false;
+        ambientOpts?.onListening?.(false);
       }
-      recognition = null;
-      ambientOpts?.onListening?.(false);
     },
     listen(lang) {
       if (!enabled || !Recognition) {
@@ -190,7 +260,7 @@ export function createVoice(): Voice {
           recognition = null;
           if (wasAmbient && saved) this.startAmbient(saved);
           if (transcript) resolve(transcript);
-          else reject(new Error(use === "fa" ? "نشنیدم." : "Didn't catch that."));
+          else reject(new Error("نشنیدم."));
         };
         rec.onerror = (event) => {
           recognition = null;

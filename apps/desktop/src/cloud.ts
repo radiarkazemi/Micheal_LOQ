@@ -156,11 +156,14 @@ export class MichealCloud {
         this.session = packet.session;
         this.emit();
         break;
-      case "status":
+      case "status": {
+        const nextLive = packet.status === "online" ? true : this.live;
+        if (packet.status === this.status && nextLive === this.live) break;
         this.status = packet.status;
         if (packet.status === "online") this.live = true;
         this.emit();
         break;
+      }
       case "message":
         this.messages = [...this.messages, packet.message].slice(-80);
         this.emit();

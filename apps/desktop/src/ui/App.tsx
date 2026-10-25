@@ -69,25 +69,36 @@ export function App() {
     return () => cloud.disconnect();
   }, [cloud]);
 
-  // Always-on ears — no click required (Jarvis listens)
+  // Always-on ears — stable; do not tear down on every status tick
+  const connected = state.connected;
+  const busyRef = useRef(false);
   useEffect(() => {
-    if (!cloud || !ambientOn || !voice.supported.stt || !state.connected) {
+    if (!cloud || !ambientOn || !voice.supported.stt || !connected) {
       voice.stopAmbient();
       setEars(false);
       return;
     }
+    voice.setListenLang("fa");
+    setUiLang("fa");
     voice.startAmbient({
-      lang: uiLang,
-      onListening: setEars,
+      lang: "fa",
+      onListening: (on) => setEars(on),
       onPartial: setHeard,
       onPhrase: (text) => {
+        if (busyRef.current) return;
+        const t = text.trim();
+        if (t.length < 2) return;
         setHeard("");
-        if (hasPersian(text)) setUiLang("fa");
-        cloud.chat(text);
+        setUiLang("fa");
+        busyRef.current = true;
+        cloud.chat(t);
+        window.setTimeout(() => {
+          busyRef.current = false;
+        }, 2500);
       },
     });
     return () => voice.stopAmbient();
-  }, [cloud, ambientOn, voice, uiLang, state.connected]);
+  }, [cloud, ambientOn, voice, connected]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -97,36 +108,25 @@ export function App() {
   const orbClass = [
     "orb",
     state.speaking ? "speaking" : "",
-    state.listening || ears ? "listening" : "",
+    ambientOn && connected ? "listening" : "",
   ]
     .filter(Boolean)
     .join(" ");
 
-  const caption = state.speaking
-    ? fa
+  // One stable status — no hear/see flipping
+  const caption = !state.connected
+    ? "اتصال به مغز ابری…"
+    : state.speaking
       ? "در حال صحبت…"
-      : "Speaking…"
-    : ears || state.listening
-      ? fa
-        ? "دارم می‌شنوم و می‌فهمم…"
-        : "Hearing & understanding…"
-      : !state.connected
-        ? fa
-          ? "اتصال به مغز ابری…"
-          : "Linking to cloud brain…"
-        : session?.focusMode
-          ? fa
-            ? "فوکوس قفل — دارم می‌بینم"
-            : "Focus lock — still watching"
-          : fa
-            ? "دارم همه‌چیز رو می‌بینم"
-            : "Watching everything";
+      : ambientOn
+        ? "مراقب و شنوا"
+        : "مراقب (شنود خاموش)";
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !cloud) return;
-    if (hasPersian(text)) setUiLang("fa");
+    setUiLang("fa");
     setDraft("");
     cloud.chat(text);
   };
@@ -170,14 +170,11 @@ export function App() {
             {state.live ? (fa ? "زنده" : "live") : fa ? "وصل…" : "linking"}
           </span>
           <span className="pill">
-            <span className={`dot ${ears ? "warn" : state.connected ? "on" : ""}`} />
-            {ears ? (fa ? "گوش فعال" : "ears on") : state.connected ? (fa ? "چشم باز" : "eyes open") : fa ? "آفلاین" : "offline"}
+            <span className={`dot ${state.connected ? (ambientOn ? "warn" : "on") : ""}`} />
+            {!state.connected ? "آفلاین" : ambientOn ? (ears ? "شنوا" : "آماده شنود") : "فقط ناظر"}
           </span>
           <button type="button" className={`chip ${ambientOn ? "on" : ""}`} onClick={() => setAmbientOn((v) => !v)}>
-            {fa ? (ambientOn ? "شنود دائم" : "شنود خاموش") : ambientOn ? "Always listen" : "Listen off"}
-          </button>
-          <button type="button" className={`chip ${fa ? "on" : ""}`} onClick={() => setUiLang(fa ? "en" : "fa")}>
-            {fa ? "EN" : "FA"}
+            {ambientOn ? "شنود دائم" : "شنود خاموش"}
           </button>
         </div>
       </header>
@@ -194,16 +191,10 @@ export function App() {
             <h2>{caption}</h2>
             <p>
               {heard
-                ? fa
-                  ? `شنیدم: ${heard}`
-                  : `Hearing: ${heard}`
+                ? `شنیدم: ${heard}`
                 : session
-                  ? fa
-                    ? `مراقب ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. لازم نیست کلیک کنی — حرف بزن یا فقط کار کن.`
-                    : `On ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. No clicks needed — speak or just work.`
-                  : fa
-                    ? "مغز ابری در حال همگام‌سازی…"
-                    : "Cloud brain syncing…"}
+                  ? `مراقب ${session.symbol} · ${session.timeframe}${session.price != null ? ` · ${session.price}` : ""}. فارسی حرف بزن — من جواب می‌دم.`
+                  : "مغز ابری در حال همگام‌سازی…"}
             </p>
           </div>
         </section>
