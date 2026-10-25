@@ -23,30 +23,17 @@ function hasPersian(text: string): boolean {
   return PERSIAN_RE.test(text);
 }
 
-async function armMicrophone(): Promise<string | null> {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    return "مرورگر/اپ به میک دسترسی ندارد.";
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // Keep track briefly then release — SpeechRecognition opens its own stream
-    for (const t of stream.getTracks()) t.stop();
-    return null;
-  } catch {
-    return "دسترسی میکروفون بسته است. در ویندوز: Settings → Privacy → Microphone → اجازه به Micheal.";
-  }
-}
-
 export function App() {
   const voice = useMemo(() => createVoice(), []);
   const [cfg, setCfg] = useState<{ url: string; token: string } | null>(null);
   const [, setUiLang] = useState<"en" | "fa">("fa");
-  const [ambientOn, setAmbientOn] = useState(true);
-  const [ears, setEars] = useState(false);
   const [heard, setHeard] = useState("");
   const [micMsg, setMicMsg] = useState<string | null>(null);
   const [micArmed, setMicArmed] = useState(false);
-  const [holding, setHolding] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [level, setLevel] = useState(0);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,25 +62,6 @@ export function App() {
   const session = state.session;
   const rtlChat = hasPersian(draft) || state.messages.some((m) => hasPersian(m.text));
   const connected = state.connected;
-  const busyRef = useRef(false);
-
-  // Ask Windows/Electron for mic as soon as cloud is up
-  useEffect(() => {
-    if (!connected) return;
-    let cancelled = false;
-    void armMicrophone().then((err) => {
-      if (cancelled) return;
-      setMicMsg(err);
-      setMicArmed(!err);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [connected]);
-
-  useEffect(() => {
-    voice.setListenLang("fa");
-  }, [voice]);
 
   useEffect(() => {
     if (!cloud) return;
@@ -102,57 +70,98 @@ export function App() {
   }, [cloud]);
 
   useEffect(() => {
-    if (!cloud || !ambientOn || !voice.supported.stt || !connected || !micArmed) {
-      voice.stopAmbient();
-      setEars(false);
-      return;
-    }
-    voice.setListenLang("fa");
-    voice.startAmbient({
-      lang: "fa",
-      onListening: (on) => setEars(on),
-      onPartial: setHeard,
-      onPhrase: (text) => {
-        if (busyRef.current) return;
-        const t = text.trim();
-        if (t.length < 2) return;
-        setHeard("");
-        setUiLang("fa");
-        busyRef.current = true;
-        cloud.chat(t);
-        window.setTimeout(() => {
-          busyRef.current = false;
-        }, 2500);
-      },
-    });
-    return () => voice.stopAmbient();
-  }, [cloud, ambientOn, voice, connected, micArmed]);
-
-  useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.messages]);
 
-  const orbClass = [
-    "orb",
-    state.speaking ? "speaking" : "",
-    holding || (ambientOn && connected && micArmed) ? "listening" : "",
-  ]
+  const boardReady = Boolean(session?.symbol && session?.timeframe);
+  const orbClass = ["orb", state.speaking ? "speaking" : "", recording || transcribing ? "listening" : ""]
     .filter(Boolean)
     .join(" ");
 
-  const boardReady = Boolean(session?.symbol && session?.timeframe);
   const caption = !state.connected
     ? "اتصال به مغز ابری…"
     : state.speaking
       ? "در حال صحبت…"
-      : holding
-        ? "بگو… دارم گوش می‌دم"
-        : !micArmed
-          ? "میکروفون لازم است"
-          : ambientOn
-            ? "مراقب و شنوا"
-            : "مراقب (شنود خاموش)";
+      : transcribing
+        ? "در حال فهمیدن صدا…"
+        : recording
+          ? "دارم ضبط می‌کنم — دوباره بزن تا بفرستم"
+          : "آماده — دکمه میک را بزن و حرف بزن";
+
+  const armMic = async (): Promise<boolean> => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      for (const t of stream.getTracks()) t.stop();
+      setMicArmed(true);
+      setMicMsg(null);
+      return true;
+    } catch {
+      setMicArmed(false);
+      setMicMsg(
+        "ویندوز میکروفون را بسته. Settings → Privacy & security → Microphone → Micheal / Desktop apps را روشن کن، بعد دوباره بزن.",
+      );
+      return false;
+    }
+  };
+
+  const toggleTalk = async () => {
+    if (!cloud || busyRef.current || transcribing) return;
+    if (!voice.supported.media) {
+      setMicMsg("این محیط ضبط صدا ندارد. از کامپیوتر ویندوز با اپ جدید استفاده کن.");
+      return;
+    }
+
+    if (!recording) {
+      const ok = micArmed || (await armMic());
+      if (!ok) return;
+      try {
+        await voice.startRecording((lv) => setLevel(lv));
+        setRecording(true);
+        cloud.setListening(true);
+        setHeard("");
+        setMicMsg("حرف بزن… وقتی تموم شد دوباره همین دکمه را بزن.");
+      } catch (err) {
+        setMicMsg(err instanceof Error ? err.message : "شروع ضبط نشد");
+        setRecording(false);
+        cloud.setListening(false);
+      }
+      return;
+    }
+
+    // Stop → upload → chat
+    busyRef.current = true;
+    setRecording(false);
+    setTranscribing(true);
+    cloud.setListening(false);
+    setMicMsg("دارم صدایت را می‌فرستم به آلمان…");
+    try {
+      const blob = await voice.stopRecording();
+      setLevel(0);
+      if (!blob.size || blob.size < 800) {
+        setMicMsg("خیلی کوتاه بود — دوباره بزن، یک‌ثانیه حرف بزن، بعد دوباره بزن.");
+        return;
+      }
+      const text = await cloud.transcribe(blob, "fa");
+      if (!text) {
+        setMicMsg("چیزی نفهمیدم — واضح‌تر و کمی بلندتر بگو.");
+        return;
+      }
+      setHeard(text);
+      setMicMsg(null);
+      setUiLang("fa");
+      cloud.chat(text);
+    } catch (err) {
+      setMicMsg(
+        err instanceof Error
+          ? `میک/STT: ${err.message}`
+          : "ارسال صدا شکست خورد — اتصال به سرور را چک کن.",
+      );
+    } finally {
+      setTranscribing(false);
+      busyRef.current = false;
+    }
+  };
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -174,33 +183,6 @@ export function App() {
     if (Number.isFinite(n)) cloud.patchSession({ price: n });
   };
 
-  const holdTalk = async () => {
-    if (!cloud || !voice.supported.stt) return;
-    if (!micArmed) {
-      const err = await armMicrophone();
-      setMicMsg(err);
-      setMicArmed(!err);
-      if (err) return;
-    }
-    setHolding(true);
-    voice.setPaused(true);
-    cloud.setListening(true);
-    try {
-      const text = await voice.listen("fa");
-      setHolding(false);
-      cloud.setListening(false);
-      voice.setPaused(false);
-      if (text.trim()) {
-        setUiLang("fa");
-        cloud.chat(text.trim());
-      }
-    } catch {
-      setHolding(false);
-      cloud.setListening(false);
-      voice.setPaused(false);
-    }
-  };
-
   if (!cfg) {
     return (
       <div className="app gate" dir="rtl">
@@ -217,7 +199,7 @@ export function App() {
       <header className="topbar">
         <div>
           <div className="brand-mark">MICHEAL</div>
-          <div className="brand-sub">جارویس معاملاتی · با هم انتخاب می‌کنیم · فارسی</div>
+          <div className="brand-sub">جارویس معاملاتی · میک واقعی · فارسی</div>
         </div>
         <div className="pills">
           <span className="pill">
@@ -225,11 +207,11 @@ export function App() {
             {state.live ? "زنده" : "وصل…"}
           </span>
           <span className="pill">
-            <span className={`dot ${micArmed ? (ears || holding ? "warn" : "on") : ""}`} />
-            {!micArmed ? "میک قطع" : holding ? "گوش دادن" : ears ? "شنوا" : "آماده"}
+            <span className={`dot ${recording || transcribing ? "warn" : micArmed ? "on" : ""}`} />
+            {transcribing ? "فهم صدا" : recording ? "ضبط" : micArmed ? "میک آماده" : "میک قطع"}
           </span>
-          <button type="button" className={`chip ${ambientOn ? "on" : ""}`} onClick={() => setAmbientOn((v) => !v)}>
-            {ambientOn ? "شنود دائم" : "شنود خاموش"}
+          <button type="button" className="chip" onClick={() => void armMic()}>
+            فعال‌سازی میک
           </button>
         </div>
       </header>
@@ -248,22 +230,28 @@ export function App() {
               {heard
                 ? `شنیدم: ${heard}`
                 : boardReady
-                  ? `با هم روی ${session!.symbol} · ${session!.timeframe}${session!.price != null ? ` · ${session!.price}` : ""}. حرف بزن یا دکمه میک را نگه دار.`
-                  : "هیچ پیش‌فرضی نیست. بگو چه نماد و تایم‌فریمی — مثلاً «طلا پانزده»."}
+                  ? `با هم روی ${session!.symbol} · ${session!.timeframe}. دکمه میک = ضبط واقعی (نه Web Speech شکسته).`
+                  : "هیچ پیش‌فرضی نیست. میک را بزن و بگو مثلاً «طلا پانزده»."}
             </p>
+            <div className="level" aria-hidden>
+              <div className="level-fill" style={{ width: `${Math.round(level * 100)}%` }} />
+            </div>
             <button
               type="button"
-              className={`btn talk ${holding ? "on" : ""}`}
-              onMouseDown={() => void holdTalk()}
-              onTouchStart={() => void holdTalk()}
-              disabled={!connected}
+              className={`btn talk ${recording ? "on" : ""} ${transcribing ? "busy" : ""}`}
+              onClick={() => void toggleTalk()}
+              disabled={!connected || transcribing}
             >
-              {holding ? "…در حال شنیدن" : "نگه دار و حرف بزن"}
+              {transcribing
+                ? "…در حال فهمیدن"
+                : recording
+                  ? "توقف و ارسال"
+                  : "بزن و حرف بزن"}
             </button>
             {micMsg ? <p className="hint danger">{micMsg}</p> : null}
-            {!voice.supported.stt ? (
-              <p className="hint danger">تشخیص گفتار در این محیط پشتیبانی نمی‌شود — متن بفرست یا اپ جدید را نصب کن.</p>
-            ) : null}
+            <p className="hint">
+              یک‌بار بزن → حرف بزن (نوار سبز باید حرکت کند) → دوباره بزن تا بفرستد. اگر نوار حرکت نکرد، میک ویندوز بسته است.
+            </p>
           </div>
         </section>
 
@@ -349,18 +337,6 @@ export function App() {
               >
                 {state.voiceEnabled ? "صدا روشن" : "صدا خاموش"}
               </button>
-              <button
-                type="button"
-                className="chip"
-                onClick={() => {
-                  void armMicrophone().then((err) => {
-                    setMicMsg(err);
-                    setMicArmed(!err);
-                  });
-                }}
-              >
-                فعال‌سازی میک
-              </button>
             </div>
           </section>
 
@@ -392,7 +368,6 @@ export function App() {
                 ارسال
               </button>
             </form>
-            <p className="hint">میک را یک‌بار اجازه بده · دکمه «نگه دار و حرف بزن» مطمئن‌ترین راه است · جواب‌ها فارسی</p>
           </section>
         </aside>
       </main>

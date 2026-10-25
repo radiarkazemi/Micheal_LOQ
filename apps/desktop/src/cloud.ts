@@ -135,6 +135,25 @@ export class MichealCloud {
     this.send({ type: "chat", text });
   }
 
+  /** Upload recorded audio to Germany STT (Whisper). */
+  async transcribe(blob: Blob, lang: "fa" | "en" = "fa"): Promise<string> {
+    const base = this.url.replace(/\/$/, "");
+    const res = await fetch(`${base}/v1/stt?lang=${lang}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "X-Micheal-Token": this.token,
+        "Content-Type": blob.type || "audio/webm",
+      },
+      body: blob,
+    });
+    const data = (await res.json()) as { ok?: boolean; text?: string; error?: string };
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || `STT ${res.status}`);
+    }
+    return (data.text || "").trim();
+  }
+
   patchSession(patch: Partial<SessionState>): void {
     this.send({ type: "session.patch", patch });
   }

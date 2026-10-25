@@ -529,6 +529,7 @@ textarea {
   border: 1px solid var(--cyan-dim);
   background: linear-gradient(180deg, rgba(79, 214, 196, 0.22), rgba(79, 214, 196, 0.08));
   cursor: pointer;
+  color: var(--text);
 }
 
 .btn.talk.on,
@@ -537,8 +538,29 @@ textarea {
   box-shadow: 0 0 24px rgba(79, 214, 196, 0.35);
 }
 
+.btn.talk.busy {
+  opacity: 0.75;
+  cursor: wait;
+}
+
+.level {
+  margin-top: 12px;
+  width: min(100%, 320px);
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.level-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #3ecf8e, #4fd6c4);
+  transition: width 80ms linear;
+}
+
 .hint.danger {
-  color: var(--danger);
+  color: #ff8b8b;
   margin-top: 8px;
 }
 

@@ -11,6 +11,7 @@ import { detectLang } from "./lang.js";
 import { extractSessionPatch } from "./intent.js";
 import { observeAmbient } from "./observe.js";
 import { TradingSession } from "./session.js";
+import { readRawBody, transcribeAudio } from "./stt.js";
 
 const config = loadConfig();
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -219,6 +220,36 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/v1/stt") {
+    try {
+      if (tokenFromReq(req) !== config.token) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const body = await readRawBody(req);
+      if (!body.length) {
+        json(res, 400, { error: "empty audio" });
+        return;
+      }
+      const lang = (url.searchParams.get("lang") || req.headers["x-micheal-lang"] || "fa").toString();
+      const contentType = (req.headers["content-type"] || "audio/webm").toString();
+      const result = await transcribeAudio({
+        token: config.token,
+        body,
+        contentType,
+        lang,
+      });
+      if ("error" in result) {
+        json(res, 503, { error: result.error });
+        return;
+      }
+      json(res, 200, { ok: true, text: result.text, lang });
+    } catch (err) {
+      json(res, 400, { error: err instanceof Error ? err.message : "stt failed" });
+    }
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/v1/chat") {
     try {
       const raw = await readBody(req);
@@ -260,8 +291,8 @@ a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#
 small{color:#9aa8c0}</style>
 <div class="box"><h1>نصب Micheal روی ویندوز</h1>
 <p>اگر ویندوز لینک مستقیم سرور را بلاک کرد، از <b>GitHub (HTTPS)</b> دانلود کن:</p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.1-mic-fix/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.1-mic-fix/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.2-real-mic/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.2-real-mic/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
 <p><a href="/download/Micheal-Windows.zip">ZIP از همین سرور</a> · <a href="/download/Micheal-Setup.exe">EXE از همین سرور</a></p>
 <small>اگر SmartScreen آمد: More info → Run anyway. میکروفون را Allow کن.</small>
 </div>`;
