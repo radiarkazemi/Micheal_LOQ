@@ -182,7 +182,7 @@ export function App() {
 
   const boardReady = Boolean(session?.symbol && session?.timeframe);
   const orbClass = [
-    "orb",
+    "core-orb",
     state.speaking || phase === "speaking" ? "speaking" : "",
     earsOn && phase !== "sleep" ? "listening" : "",
   ]
@@ -191,14 +191,25 @@ export function App() {
 
   const caption =
     phase === "speaking" || state.speaking
-      ? "در حال صحبت…"
+      ? "در حال پاسخ…"
       : phase === "thinking"
-        ? "دارم می‌فهمم…"
+        ? "در حال استدلال…"
         : phase === "listening" || wake.isConversationOpen
-          ? "بیدارم — حرف بزن"
+          ? "آگاه و شنوا"
           : earsOn
-            ? "خواب سبک — بگو هی میشل"
-            : "در انتظار میکروفون…";
+            ? "آماده — بگو هی میشل"
+            : "در انتظار حسگر صوتی…";
+
+  const cognition =
+    phase === "speaking" || state.speaking
+      ? "SPEAK"
+      : phase === "thinking"
+        ? "REASON"
+        : wake.isConversationOpen
+          ? "ACTIVE"
+          : earsOn
+            ? "STANDBY"
+            : "OFFLINE";
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -223,9 +234,9 @@ export function App() {
   if (!cfg) {
     return (
       <div className="app gate" dir="rtl">
-        <div className="gate-card">
-          <div className="brand-mark">MICHEAL</div>
-          <p className="gate-copy">در حال بیدار شدن…</p>
+        <div className="gate-inner">
+          <h1 className="brand-hero">MICHEAL</h1>
+          <p>initializing cognition</p>
         </div>
       </div>
     );
@@ -233,166 +244,169 @@ export function App() {
 
   return (
     <div className="app" dir="rtl">
-      <header className="topbar">
-        <div>
-          <div className="brand-mark">MICHEAL</div>
-          <div className="brand-sub">هی میشل · همیشه شنوا · فارسی / English</div>
-        </div>
-        <div className="pills">
-          <span className="pill">
-            <span className={`dot ${state.live ? "on" : ""}`} />
-            {state.live ? "زنده" : "وصل…"}
-          </span>
-          <span className="pill">
-            <span className={`dot ${earsOn ? (wake.isConversationOpen ? "warn" : "on") : ""}`} />
-            {!earsOn ? "میک قطع" : wake.isConversationOpen ? "بیدار" : "منتظر wake"}
-          </span>
-        </div>
-      </header>
+      <section className="presence" aria-label="Micheal">
+        <div className="presence-bg" aria-hidden />
+        <div className="presence-inner">
+          <h1 className="brand-hero">MICHEAL</h1>
+          <p className="brand-tag">Cognitive trading companion</p>
 
-      <main className="stage">
-        <section className="hud" aria-label="Micheal presence">
-          <div className="orb-wrap">
-            <div className={orbClass} aria-hidden>
-              <div className="ring" />
-              <div className="ring outer" />
-            </div>
+          <div className="core" aria-hidden>
+            <div className="core-ring" />
+            <div className="core-ring mid" />
+            <div className="core-ring inner" />
+            <div className={orbClass} />
           </div>
-          <div className="caption">
-            <h2>{caption}</h2>
-            <p>
-              {heard
-                ? `شنیدم: ${heard}`
-                : boardReady
-                  ? `با هم روی ${session!.symbol} · ${session!.timeframe}. مثل جارویس — بدون دکمه.`
-                  : "هیچ پیش‌فرضی نیست. بگو «هی میشل، طلا پانزده»."}
-            </p>
-            <div className="level" aria-hidden>
-              <div className="level-fill" style={{ width: `${Math.round(level * 100)}%` }} />
-            </div>
-            {micMsg ? <p className="hint danger">{micMsg}</p> : null}
-            <p className="hint">
-              Wake: «هی میشل» / Hey Micheal — بعدش ۷۵ ثانیه بدون wake حرف بزن. نوار سبز = گوش فعال.
-            </p>
+
+          <p className="status-line">{caption}</p>
+          <p className="status-sub">
+            {heard
+              ? `شنیدم: ${heard}`
+              : boardReady
+                ? `چارچوب فعال — ${session!.symbol} · ${session!.timeframe}. بدون دکمه حرف بزن.`
+                : "ذهن آماده‌ست. بگو «هی میشل»، بعد نماد و تایم‌فریم را با هم قفل می‌کنیم."}
+          </p>
+
+          <div className="audio-rail" aria-hidden>
+            <i style={{ width: `${Math.round(level * 100)}%` }} />
           </div>
-        </section>
 
-        <aside className="side">
-          <section className="panel">
-            <h3>فید جلسه</h3>
-            <div className="grid2">
-              <div className="field">
-                <label htmlFor="symbol">نماد</label>
-                <input
-                  id="symbol"
-                  value={session?.symbol ?? ""}
-                  placeholder="هنوز انتخاب نشده"
-                  onChange={(e) => cloud?.patchSession({ symbol: e.target.value })}
-                  spellCheck={false}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="tf">تایم‌فریم</label>
-                <select
-                  id="tf"
-                  value={session?.timeframe ?? ""}
-                  onChange={(e) => cloud?.patchSession({ timeframe: e.target.value })}
-                >
-                  <option value="">انتخاب نشده</option>
-                  {TIMEFRAMES.map((tf) => (
-                    <option key={tf} value={tf}>
-                      {tf}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label htmlFor="price">مارک قیمت</label>
-                <input
-                  id="price"
-                  value={priceDraft}
-                  placeholder="مثلاً 2345.5"
-                  onChange={(e) => setPriceDraft(e.target.value)}
-                  onBlur={applyPrice}
-                  onKeyDown={(e) => e.key === "Enter" && applyPrice()}
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="bias">بایاس</label>
-                <select
-                  id="bias"
-                  value={session?.bias ?? "unknown"}
-                  onChange={(e) => cloud?.patchSession({ bias: e.target.value as SessionState["bias"] })}
-                >
-                  <option value="unknown">نامشخص</option>
-                  <option value="long">لانگ</option>
-                  <option value="short">شورت</option>
-                  <option value="flat">فلت</option>
-                </select>
-              </div>
-              <div className="field span2">
-                <label htmlFor="note">پلن / ابطال</label>
-                <textarea
-                  id="note"
-                  value={session?.note ?? ""}
-                  placeholder="با هم می‌نویسیم…"
-                  onChange={(e) => cloud?.patchSession({ note: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="chips">
-              <button
-                type="button"
-                className={`chip ${session?.focusMode ? "on" : ""}`}
-                onClick={() => cloud?.patchSession({ focusMode: !session?.focusMode })}
-              >
-                فوکوس
-              </button>
-              <button
-                type="button"
-                className={`chip ${state.voiceEnabled ? "on" : ""}`}
-                onClick={() => {
-                  const next = !state.voiceEnabled;
-                  voice.setEnabled(next);
-                  cloud?.setVoiceEnabled(next);
-                }}
-              >
-                {state.voiceEnabled ? "پاسخ صوتی روشن" : "پاسخ صوتی خاموش"}
-              </button>
-            </div>
-          </section>
+          <div className="telemetry">
+            <span className={state.live ? "live" : ""}>
+              link <b>{state.live ? "GERMANY" : "…"}</b>
+            </span>
+            <span>
+              mind <b>{cognition}</b>
+            </span>
+            <span>
+              wake <b>{wake.isConversationOpen ? "OPEN" : "ARMED"}</b>
+            </span>
+            <span>
+              board <b>{boardReady ? `${session!.symbol}/${session!.timeframe}` : "—"}</b>
+            </span>
+          </div>
 
-          <section className="panel transcript">
-            <h3>کانال زنده</h3>
-            <div className={`scroll ${rtlChat ? "rtl-text" : ""}`} ref={scrollRef}>
-              {state.messages.map((m) => (
-                <div key={m.id} className={`bubble ${m.role}`} dir={hasPersian(m.text) ? "rtl" : "ltr"}>
-                  <span className="meta">
-                    {m.role === "micheal" ? "MICHEAL" : m.role === "you" ? "تو" : "SYS"}
-                    {m.spoken ? " · صوتی" : ""}
+          {micMsg ? <p className="alert">{micMsg}</p> : null}
+        </div>
+      </section>
+
+      <div className="workspace">
+        <section className="stream">
+          <div className="stream-head">
+            <h2>Thought stream</h2>
+            <span>FA / EN · voice-first</span>
+          </div>
+          <div className={`scroll ${rtlChat ? "rtl-text" : ""}`} ref={scrollRef}>
+            {state.messages.length === 0 ? (
+              <div className="turn system">هنوز گفت‌وگویی نیست — با «هی میشل» شروع کن.</div>
+            ) : (
+              state.messages.map((m) => (
+                <div key={m.id} className={`turn ${m.role}`} dir={hasPersian(m.text) ? "rtl" : "ltr"}>
+                  <span className="who">
+                    {m.role === "micheal" ? "Micheal" : m.role === "you" ? "You" : "System"}
+                    {m.spoken ? " · voiced" : ""}
                   </span>
                   {m.text}
                 </div>
-              ))}
-            </div>
-          </section>
+              ))
+            )}
+          </div>
+          <form className="composer" onSubmit={onSubmit}>
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="اختیاری — معمولاً فقط حرف بزن"
+              aria-label="Message"
+              dir="rtl"
+            />
+            <button type="submit">ارسال</button>
+          </form>
+        </section>
 
-          <section className="panel">
-            <form className="composer" onSubmit={onSubmit}>
+        <aside className="session">
+          <h2>Session frame</h2>
+          <div className="grid2">
+            <div className="field">
+              <label htmlFor="symbol">نماد</label>
               <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="اختیاری — معمولاً فقط حرف بزن"
-                aria-label="Message"
-                dir="rtl"
+                id="symbol"
+                value={session?.symbol ?? ""}
+                placeholder="—"
+                onChange={(e) => cloud?.patchSession({ symbol: e.target.value })}
+                spellCheck={false}
               />
-              <button type="submit" className="btn">
-                ارسال
-              </button>
-            </form>
-          </section>
+            </div>
+            <div className="field">
+              <label htmlFor="tf">تایم‌فریم</label>
+              <select
+                id="tf"
+                value={session?.timeframe ?? ""}
+                onChange={(e) => cloud?.patchSession({ timeframe: e.target.value })}
+              >
+                <option value="">—</option>
+                {TIMEFRAMES.map((tf) => (
+                  <option key={tf} value={tf}>
+                    {tf}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="price">مارک</label>
+              <input
+                id="price"
+                value={priceDraft}
+                placeholder="price"
+                onChange={(e) => setPriceDraft(e.target.value)}
+                onBlur={applyPrice}
+                onKeyDown={(e) => e.key === "Enter" && applyPrice()}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="bias">بایاس</label>
+              <select
+                id="bias"
+                value={session?.bias ?? "unknown"}
+                onChange={(e) => cloud?.patchSession({ bias: e.target.value as SessionState["bias"] })}
+              >
+                <option value="unknown">—</option>
+                <option value="long">long</option>
+                <option value="short">short</option>
+                <option value="flat">flat</option>
+              </select>
+            </div>
+            <div className="field span2">
+              <label htmlFor="note">پلن / ابطال</label>
+              <textarea
+                id="note"
+                value={session?.note ?? ""}
+                placeholder="با هم می‌نویسیم…"
+                onChange={(e) => cloud?.patchSession({ note: e.target.value })}
+              />
+            </div>
+          </div>
+          <div className="ctrl">
+            <button
+              type="button"
+              className={session?.focusMode ? "on" : ""}
+              onClick={() => cloud?.patchSession({ focusMode: !session?.focusMode })}
+            >
+              Focus
+            </button>
+            <button
+              type="button"
+              className={state.voiceEnabled ? "on" : ""}
+              onClick={() => {
+                const next = !state.voiceEnabled;
+                voice.setEnabled(next);
+                cloud?.setVoiceEnabled(next);
+              }}
+            >
+              Voice {state.voiceEnabled ? "on" : "off"}
+            </button>
+          </div>
+          <p className="hint">هی میشل / Hey Micheal · ۷۵s conversation window · GPT core · Germany</p>
         </aside>
-      </main>
+      </div>
     </div>
   );
 }
