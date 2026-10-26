@@ -1,0 +1,16 @@
+node_modules
+dist
+build
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+apps/desktop/release
+apps/desktop/dist
+*.log
+.vigil-ssh-pass
+deploy/secrets/
+deploy/release/node_modules
+deploy/release/download/
+deploy/release/hud/
