@@ -4,7 +4,7 @@ const WAKE_EN =
   /(?:^|[\s,،.!?])(?:(?:hey|hi|ok|okay)\s+)?(?:micheal|michael|michel|jarvis)(?:[\s,،.!?؟]|$)/i;
 
 const WAKE_FA =
-  /(?:^|[\s,،.!?؟])(?:(?:هی|های|هِی|هوی)\s*)?(?:میشل|ميشل|جارویس)(?:[\s,،.!?؟]|$)/;
+  /(?:^|[\s,،.!?؟])(?:(?:هی|های|هِی|هوی)\s*)?(?:مایکل|مايکل|میشل|ميشل|جارویس)(?:[\s,،.!?؟]|$)/;
 
 export interface WakeResult {
   readonly awake: boolean;

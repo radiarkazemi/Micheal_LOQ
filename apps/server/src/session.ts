@@ -77,11 +77,11 @@ export class TradingSession {
         priority: "normal",
         text: partial.focusMode
           ? fa
-            ? "فوکوس مود فعاله. حرف کمتر؛ فقط ریسک جدی قطع می‌کنم."
-            : "Focus mode engaged, sir. I'll keep chatter minimal and interrupt only for material risk."
+            ? "محمد، فوکوس مود فعاله. حرف کمتر؛ فقط ریسک جدی قطع می‌کنم."
+            : "Focus mode engaged, Mohammad. I'll keep chatter minimal and interrupt only for material risk."
           : fa
-            ? "فوکوس آزاد شد. حالت گفت‌وگوی کامل برگشت."
-            : "Focus mode released. Full conversational mode restored.",
+            ? "محمد، فوکوس آزاد شد. حالت گفت‌وگوی کامل برگشت."
+            : "Focus mode released, Mohammad. Full conversational mode restored.",
       };
     }
     return hint;

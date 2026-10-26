@@ -18,9 +18,9 @@ PORT = int(os.environ.get("MICHEAL_STT_PORT", "8791"))
 MODEL_NAME = os.environ.get("MICHEAL_STT_MODEL", "base")
 TOKEN = os.environ.get("MICHEAL_TOKEN", "").strip()
 INITIAL = (
-    "Micheal trading Jarvis. Persian فارسی and English. "
+    "Micheal trading Jarvis for Mohammad. Persian فارسی and English. "
     "طلا XAUUSD یورو دلار EURUSD پوند GBPUSD تایم فریم پانزده شصت. "
-    "Hey Micheal هی میشل."
+    "Hey Micheal هی مایکل هی میشل محمد."
 )
 
 print(f"[micheal-stt] loading model={MODEL_NAME} …", flush=True)

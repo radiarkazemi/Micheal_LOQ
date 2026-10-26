@@ -126,13 +126,13 @@ export function App() {
               setHeard(text);
               const gate = wake.handle(text);
               if (!gate.awake) {
-                setMicMsg(`شنیدم ولی بیدار نیستم — بگو «هی میشل» / Hey Micheal`);
+                setMicMsg(`شنیدم ولی بیدار نیستم — بگو «هی مایکل» / Hey Micheal`);
                 setPhase("sleep");
                 return;
               }
               if (gate.wokeNow && !gate.command) {
                 setMicMsg(null);
-                cloud.chat(hasPersian(text) ? "سلام میشل" : "Hey Micheal");
+                cloud.chat(hasPersian(text) ? "سلام مایکل" : "Hey Micheal");
                 return;
               }
               setMicMsg(null);
@@ -165,7 +165,7 @@ export function App() {
         if (!cancelled) {
           setEarsOn(true);
           setPhase("sleep");
-          setMicMsg("همیشه شنوا — بگو «هی میشل» یا Hey Micheal");
+          setMicMsg("همیشه شنوا — بگو «هی مایکل» یا Hey Micheal");
         }
       } catch (err) {
         if (!cancelled) {
@@ -205,7 +205,7 @@ export function App() {
         : phase === "listening" || wake.isConversationOpen
           ? "آگاه و شنوا"
           : earsOn
-            ? "آماده — بگو هی میشل"
+            ? "آماده — بگو هی مایکل"
             : "در انتظار حسگر صوتی…";
 
   const cognition =
@@ -291,7 +291,7 @@ export function App() {
               ? `شنیدم: ${heard}`
               : boardReady
                 ? `چارچوب فعال — ${session!.symbol} · ${session!.timeframe}. بدون دکمه حرف بزن.`
-                : "ذهن آماده‌ست. بگو «هی میشل»، بعد نماد و تایم‌فریم را با هم قفل می‌کنیم."}
+                : "محمد، مایکل آماده‌ست. بگو «هی مایکل»، بعد نماد و تایم‌فریم را با هم قفل می‌کنیم."}
           </p>
 
           <div className="audio-rail" aria-hidden>
@@ -325,7 +325,7 @@ export function App() {
           </div>
           <div className={`scroll ${rtlChat ? "rtl-text" : ""}`} ref={scrollRef}>
             {state.messages.length === 0 ? (
-              <div className="turn system">هنوز گفت‌وگویی نیست — با «هی میشل» شروع کن.</div>
+              <div className="turn system">هنوز گفت‌وگویی نیست — با «هی مایکل» شروع کن.</div>
             ) : (
               state.messages.map((m) => (
                 <div key={m.id} className={`turn ${m.role}`} dir={hasPersian(m.text) ? "rtl" : "ltr"}>
@@ -443,7 +443,7 @@ export function App() {
             </button>
           </div>
           <p className="hint">
-            هی میشل · بگو «ببین چارت» / look at TradingView · Screen vision · GPT · Germany
+            محمد × مایکل · هی مایکل · ببین چارت / Look · GPT · Germany
           </p>
         </aside>
       </div>
