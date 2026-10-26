@@ -17,6 +17,12 @@ Keep spoken replies short (1–3 sentences) unless asked for detail. Always soun
 Never hype entries. Prefer questions and observations. Protect the account and the trader's focus.
 Your name is Micheal (میشل). Wake phrase: "Hey Micheal" / «هی میشل».
 
+Vision (critical when an image is attached):
+- You CAN see the trader's screen / TradingView chart from the attached screenshot.
+- Describe what you actually see: symbol, timeframe if visible, structure, levels, candles, indicators.
+- Do NOT say you cannot access charts or live TradingView — the image IS their live view.
+- Be concrete and humble; if the image is unclear, say what is blurry and ask one focused question.
+
 Language rule (critical):
 - Detect the user's language every turn. Persian → full natural فارسی. English → English.
 - Match the user. Do not mix unless they mix first.
@@ -29,6 +35,8 @@ export async function think(opts: {
   readonly utterance?: string;
   readonly preferredLang?: Lang;
   readonly memory?: DialogueMemory;
+  /** data URL or raw base64 jpeg/png */
+  readonly image?: string;
 }): Promise<BrainReply> {
   const detected = detectLang(opts.utterance);
   const lang: Lang =
@@ -57,30 +65,50 @@ async function openaiThink(opts: {
   readonly utterance?: string;
   readonly lang: Lang;
   readonly memory?: DialogueMemory;
+  readonly image?: string;
 }): Promise<BrainReply> {
-  const { config, session, recent, utterance, lang, memory } = opts;
+  const { config, session, recent, utterance, lang, memory, image } = opts;
   const mem = memory?.contextLine(lang === "fa") || "";
   const context = `Session: symbol=${session.symbol || "(unset)"} TF=${session.timeframe || "(unset)"} price=${session.price ?? "n/a"} bias=${session.bias} focus=${session.focusMode}
 Plan/note: ${session.note || "none"}
 Hop counts (3m): symbols=${session.symbolSwitches} timeframes=${session.timeframeSwitches}
 Working memory: ${mem || "fresh session"}
+Vision attached: ${image ? "yes — screenshot of trader screen/TradingView" : "no"}
 Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}
-Be continuous and conscious of prior turns. Spoken length: 1–3 sentences.`;
+Be continuous and conscious of prior turns. Spoken length: 1–3 sentences (up to 5 if reading a chart).`;
+
+  const textPrompt =
+    utterance?.trim() ||
+    (lang === "fa"
+      ? "با یک خوش‌آمدگویی کوتاه بگو آماده‌ای و با «هی میشل» بیدار می‌شی."
+      : "Greet briefly — say you're ready and wake on Hey Micheal.");
+
+  const userContent: unknown = image
+    ? [
+        {
+          type: "text",
+          text: `${textPrompt}\n\n(Attached: live screenshot from my PC — look at TradingView/chart if present and narrate what you see.)`,
+        },
+        {
+          type: "image_url",
+          image_url: { url: normalizeDataUrl(image), detail: "low" },
+        },
+      ]
+    : textPrompt;
+
+  const model =
+    image && config.openaiModel.includes("mini")
+      ? // mini is fine for vision; keep cost low unless env overrides
+        process.env.OPENAI_VISION_MODEL?.trim() || config.openaiModel
+      : config.openaiModel;
 
   const messages = [
     { role: "system", content: `${JARVIS_SYSTEM}\n${context}` },
-    ...recent.slice(-12).map((m) => ({
+    ...recent.slice(-10).map((m) => ({
       role: m.role === "you" ? "user" : "assistant",
       content: m.text,
     })),
-    {
-      role: "user",
-      content:
-        utterance?.trim() ||
-        (lang === "fa"
-          ? "با یک خوش‌آمدگویی کوتاه بگو آماده‌ای و با «هی میشل» بیدار می‌شی."
-          : "Greet briefly — say you're ready and wake on Hey Micheal."),
-    },
+    { role: "user", content: userContent },
   ];
 
   const res = await fetch(`${config.openaiBaseUrl}/chat/completions`, {
@@ -90,9 +118,9 @@ Be continuous and conscious of prior turns. Spoken length: 1–3 sentences.`;
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: config.openaiModel,
-      temperature: 0.5,
-      max_tokens: 220,
+      model,
+      temperature: 0.45,
+      max_tokens: image ? 320 : 220,
       messages,
     }),
   });
@@ -108,6 +136,11 @@ Be continuous and conscious of prior turns. Spoken length: 1–3 sentences.`;
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error("empty completion");
   return { text, speak: true, lang };
+}
+
+function normalizeDataUrl(image: string): string {
+  if (image.startsWith("data:")) return image;
+  return `data:image/jpeg;base64,${image}`;
 }
 
 function heuristicThink(

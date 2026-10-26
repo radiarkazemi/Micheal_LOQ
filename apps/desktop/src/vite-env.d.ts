@@ -3,6 +3,8 @@
 interface MichealDesktopBridge {
   readonly platform: string;
   readonly isElectron: true;
+  /** Returns JPEG base64 (no data: prefix) or null */
+  captureScreen?: () => Promise<string | null>;
 }
 
 interface ImportMetaEnv {

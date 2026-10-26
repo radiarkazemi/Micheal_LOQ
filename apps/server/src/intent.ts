@@ -14,7 +14,7 @@ export function extractSessionPatch(text: string): Partial<SessionState> | null 
   const patch: Patch = {};
 
   // Note: JS \\b is ASCII-only — do not use \\b around Persian words
-  if (/(xauusd|انس|طلای\s*جهانی|طلا|gold)/i.test(raw)) patch.symbol = "XAUUSD";
+  if (/(xauusd|انس|طلای\s*جهانی|طلا|gold|xau)/i.test(raw)) patch.symbol = "XAUUSD";
   else if (/(eurusd|یورو\s*دلار|یورودلار|یورو)/i.test(raw)) patch.symbol = "EURUSD";
   else if (/(gbpusd|پوند\s*دلار|پوند)/i.test(raw)) patch.symbol = "GBPUSD";
   else if (/(usdjpy|دلار\s*ین)/i.test(raw)) patch.symbol = "USDJPY";

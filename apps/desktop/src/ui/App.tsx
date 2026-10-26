@@ -4,6 +4,7 @@ import { MichealCloud } from "@/cloud";
 import { loadConfig } from "@/config";
 import { createVoice } from "@/voice";
 import { WakeGate } from "@/wake";
+import { captureForMicheal, wantsVision } from "@/vision";
 import "./styles.css";
 
 const TIMEFRAMES = ["1", "5", "15", "60", "240", "D"] as const;
@@ -136,7 +137,14 @@ export function App() {
               }
               setMicMsg(null);
               setPhase("thinking");
-              cloud.chat(gate.command || text);
+              const cmd = gate.command || text;
+              let image: string | undefined;
+              if (wantsVision(cmd)) {
+                setMicMsg("دارم چارت/صفحه را می‌بینم…");
+                image = (await captureForMicheal()) ?? undefined;
+                setMicMsg(image ? null : "اسکرین گرفته نشد — Screen permission را چک کن.");
+              }
+              cloud.chat(cmd, image);
             } catch (err) {
               setMicMsg(err instanceof Error ? err.message : "خطای شنود");
             } finally {
@@ -211,13 +219,33 @@ export function App() {
             ? "STANDBY"
             : "OFFLINE";
 
+  const sendWithOptionalVision = async (text: string) => {
+    if (!cloud) return;
+    wake.keepAlive();
+    let image: string | undefined;
+    if (wantsVision(text)) {
+      setPhase("thinking");
+      setMicMsg("دارم صفحه‌ات / TradingView را می‌بینم…");
+      try {
+        image = (await captureForMicheal()) ?? undefined;
+        if (!image) {
+          setMicMsg("نتونستم صفحه را بگیرم — در ویندوز به Micheal اجازه Screen بده، یا TradingView را جلو بیاور.");
+        } else {
+          setMicMsg(null);
+        }
+      } catch {
+        setMicMsg("دسترسی به صفحه رد شد.");
+      }
+    }
+    cloud.chat(text, image);
+  };
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     const text = draft.trim();
     if (!text || !cloud) return;
     setDraft("");
-    wake.keepAlive();
-    cloud.chat(text);
+    void sendWithOptionalVision(text);
   };
 
   const applyPrice = () => {
@@ -403,8 +431,20 @@ export function App() {
             >
               Voice {state.voiceEnabled ? "on" : "off"}
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                void sendWithOptionalVision(
+                  "Look at my TradingView / screen now and tell me exactly what you see on the chart.",
+                );
+              }}
+            >
+              Look
+            </button>
           </div>
-          <p className="hint">هی میشل / Hey Micheal · ۷۵s conversation window · GPT core · Germany</p>
+          <p className="hint">
+            هی میشل · بگو «ببین چارت» / look at TradingView · Screen vision · GPT · Germany
+          </p>
         </aside>
       </div>
     </div>

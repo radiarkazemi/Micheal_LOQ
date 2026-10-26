@@ -26,7 +26,13 @@ export interface ChatMessage {
 /** Client → server */
 export type ClientPacket =
   | { readonly type: "hello"; readonly client: "desktop" | "browser" | "electron"; readonly token: string }
-  | { readonly type: "chat"; readonly text: string; readonly id?: string }
+  | {
+      readonly type: "chat";
+      readonly text: string;
+      readonly id?: string;
+      /** JPEG/PNG data URL — Micheal looks at TradingView / screen */
+      readonly image?: string;
+    }
   | { readonly type: "session.patch"; readonly patch: Partial<SessionState> }
   | { readonly type: "ping" };
 

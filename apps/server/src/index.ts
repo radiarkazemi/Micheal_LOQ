@@ -72,24 +72,20 @@ function pushMessage(ctx: ClientCtx, role: ChatMessage["role"], text: string, sp
   return message;
 }
 
-async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
+async function handleChat(ctx: ClientCtx, text: string, image?: string): Promise<void> {
   const trimmed = text.trim();
-  if (!trimmed) return;
+  if (!trimmed && !image) return;
   const lang = detectLang(trimmed);
   ctx.session.setLang(lang === "en" ? "en" : "fa");
   ctx.session.touch();
-  pushMessage(ctx, "you", trimmed, false);
+  const shown = trimmed || (lang === "fa" ? "[نگاه به صفحه]" : "[looking at screen]");
+  pushMessage(ctx, "you", shown, false);
 
   // Choose session together from speech/text (symbol / TF / bias)
   const patch = extractSessionPatch(trimmed);
   if (patch) {
-    const hint = ctx.session.patch(patch);
+    ctx.session.patch(patch);
     send(ctx.ws, { type: "session", session: ctx.session.snapshot() });
-    if (hint && hint.priority !== "low") {
-      // fall through to think for a fuller Persian reply
-    } else if (hint) {
-      // Acknowledge briefly via full brain so tone stays Micheal
-    }
   }
 
   send(ctx.ws, { type: "status", status: "thinking" });
@@ -97,12 +93,15 @@ async function handleChat(ctx: ClientCtx, text: string): Promise<void> {
     config,
     session: ctx.session.snapshot(),
     recent: ctx.messages,
-    utterance: trimmed,
+    utterance:
+      trimmed ||
+      (lang === "fa" ? "این صفحه/چارت من است — بگو چی می‌بینی." : "This is my screen/chart — tell me what you see."),
     preferredLang: lang === "en" ? "en" : "fa",
     memory: ctx.memory,
+    image: image?.startsWith("data:") || (image && image.length > 100) ? image : undefined,
   });
   pushMessage(ctx, "micheal", reply.text, true);
-  ctx.memory.observe(trimmed, reply.text);
+  ctx.memory.observe(shown, reply.text);
   ctx.lastSpokeAt = Date.now();
   send(ctx.ws, { type: "status", status: "online" });
 }
@@ -321,8 +320,8 @@ a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#
 small{color:#9aa8c0}</style>
 <div class="box"><h1>نصب Micheal روی ویندوز</h1>
 <p>اگر ویندوز لینک مستقیم سرور را بلاک کرد، از <b>GitHub (HTTPS)</b> دانلود کن:</p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.3-jarvis-wake/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.3-jarvis-wake/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.4-vision/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.4-vision/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
 <p><a href="/download/Micheal-Windows.zip">ZIP از همین سرور</a> · <a href="/download/Micheal-Setup.exe">EXE از همین سرور</a></p>
 <small>اگر SmartScreen آمد: More info → Run anyway. میکروفون را Allow کن.</small>
 </div>`;
@@ -444,7 +443,7 @@ wss.on("connection", (ws) => {
       }
 
       if (packet.type === "chat") {
-        await handleChat(ctx, packet.text);
+        await handleChat(ctx, packet.text, "image" in packet ? packet.image : undefined);
       }
     })().catch((err) => {
       console.error("[micheal] handler error", err);

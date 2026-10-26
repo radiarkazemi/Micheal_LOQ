@@ -1,4 +1,15 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, shell, session, systemPreferences } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Tray,
+  Menu,
+  nativeImage,
+  shell,
+  session,
+  systemPreferences,
+  ipcMain,
+  desktopCapturer,
+} = require("electron");
 const path = require("node:path");
 
 const isDev = !app.isPackaged;
@@ -114,13 +125,41 @@ function createTray() {
   tray.on("double-click", () => showWindow());
 }
 
+ipcMain.handle("micheal:capture-screen", async () => {
+  try {
+    const sources = await desktopCapturer.getSources({
+      types: ["window", "screen"],
+      thumbnailSize: { width: 1600, height: 900 },
+      fetchWindowIcons: false,
+    });
+    if (!sources.length) return null;
+
+    const score = (s) => {
+      const n = `${s.name || ""}`.toLowerCase();
+      if (/tradingview|trading view|xauusd|chart/.test(n)) return 100;
+      if (/chrome|edge|brave|firefox|opera/.test(n)) return 60;
+      if (s.id.startsWith("screen:")) return 40;
+      return 10;
+    };
+    sources.sort((a, b) => score(b) - score(a));
+    const best = sources[0];
+    if (!best?.thumbnail || best.thumbnail.isEmpty()) return null;
+    // JPEG data URL — smaller than PNG for vision API
+    return best.thumbnail.toJPEG(72).toString("base64");
+  } catch (err) {
+    console.error("[micheal] capture failed", err);
+    return null;
+  }
+});
+
 app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(
       permission === "media" ||
         permission === "mediaKeySystem" ||
         permission === "notifications" ||
-        permission === "clipboard-sanitized-write",
+        permission === "clipboard-sanitized-write" ||
+        permission === "display-capture",
     );
   });
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
@@ -128,11 +167,11 @@ app.whenReady().then(async () => {
       permission === "media" ||
       permission === "mediaKeySystem" ||
       permission === "notifications" ||
-      permission === "clipboard-sanitized-write"
+      permission === "clipboard-sanitized-write" ||
+      permission === "display-capture"
     );
   });
 
-  // Windows: ask OS mic access early (helps SpeechRecognition)
   try {
     if (process.platform === "darwin" && systemPreferences?.askForMediaAccess) {
       await systemPreferences.askForMediaAccess("microphone");

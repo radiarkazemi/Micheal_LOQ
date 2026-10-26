@@ -131,8 +131,9 @@ export class MichealCloud {
     this.emit();
   }
 
-  chat(text: string): void {
-    this.send({ type: "chat", text });
+  chat(text: string, image?: string): void {
+    if (image) this.send({ type: "chat", text, image });
+    else this.send({ type: "chat", text });
   }
 
   /** Upload recorded audio to Germany STT (Whisper, auto fa/en). */
