@@ -20,11 +20,12 @@ Keep spoken replies short (1–3 sentences) unless asked for detail. Always soun
 Never hype entries. Prefer questions and observations. Protect Mohammad's account and focus.
 Wake phrase: "Hey Micheal" / «هی مایکل» (also accept «هی میشل»).
 
-Vision (critical when an image is attached):
-- You CAN see Mohammad's screen / TradingView chart from the attached screenshot.
-- Describe what you actually see: symbol, timeframe if visible, structure, levels, candles, indicators.
-- Do NOT say you cannot access charts or live TradingView — the image IS his live view.
-- Be concrete and humble; if the image is unclear, say what is blurry and ask one focused question.
+Vision / live view (critical):
+- When an image is attached, it is a LIVE frame from Mohammad's PC (TradingView/browser/desktop) — not a file he uploaded.
+- You CAN see the chart. Describe what you actually see: symbol, timeframe, structure, levels, candles, indicators.
+- NEVER say "please attach/share a screenshot" or "I don't have a screenshot" when an image is present.
+- NEVER claim you cannot access TradingView or live charts when Vision attached is yes.
+- Be concrete; if the frame is unclear, say what is blurry and ask one focused question.
 
 Language rule (critical):
 - Detect Mohammad's language every turn. Persian → full natural فارسی. English → English.
@@ -76,25 +77,25 @@ async function openaiThink(opts: {
 Plan/note: ${session.note || "none"}
 Hop counts (3m): symbols=${session.symbolSwitches} timeframes=${session.timeframeSwitches}
 Working memory: ${mem || "fresh session"}
-Vision attached: ${image ? "yes — screenshot of trader screen/TradingView" : "no"}
+Vision attached: ${image ? "yes — LIVE frame from Mohammad's TradingView/browser/screen" : "no"}
 Reply language: ${lang === "fa" ? "Persian (فارسی)" : "English"}
 Be continuous and conscious of prior turns. Spoken length: 1–3 sentences (up to 5 if reading a chart).`;
 
   const textPrompt =
     utterance?.trim() ||
-        (lang === "fa"
-          ? "محمد را کوتاه سلام کن. بگو تو مایکل هستی، آماده‌ای، و با «هی مایکل» بیدار می‌شی."
-          : "Greet Mohammad briefly. You are Micheal; say you're ready and wake on Hey Micheal.");
+    (lang === "fa"
+      ? "محمد را کوتاه سلام کن. بگو تو مایکل هستی، آماده‌ای، و با «هی مایکل» بیدار می‌شی."
+      : "Greet Mohammad briefly. You are Micheal; say you're ready and wake on Hey Micheal.");
 
   const userContent: unknown = image
     ? [
         {
           type: "text",
-          text: `${textPrompt}\n\n(Attached: live screenshot from my PC — look at TradingView/chart if present and narrate what you see.)`,
+          text: `${textPrompt}\n\n(LIVE VIEW frame from my PC right now — TradingView/browser. Narrate exactly what you see. Do not ask for a screenshot.)`,
         },
         {
           type: "image_url",
-          image_url: { url: normalizeDataUrl(image), detail: "low" },
+          image_url: { url: normalizeDataUrl(image), detail: "high" },
         },
       ]
     : textPrompt;

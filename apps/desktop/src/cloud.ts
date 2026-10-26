@@ -132,8 +132,84 @@ export class MichealCloud {
   }
 
   chat(text: string, image?: string): void {
-    if (image) this.send({ type: "chat", text, image });
-    else this.send({ type: "chat", text });
+    // Large live frames go over HTTP — WS is for light text only
+    if (image) {
+      void this.see(text, image);
+      return;
+    }
+    this.send({ type: "chat", text });
+  }
+
+  /** Live-view turn: POST frame + text so vision always reaches the brain. */
+  async see(text: string, imageDataUrl: string): Promise<void> {
+    const base = this.url.replace(/\/$/, "");
+    this.status = "thinking";
+    this.listening = false;
+    this.emit();
+    const youMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: "you",
+      text: text.trim() || "[live view]",
+      at: Date.now(),
+    };
+    this.messages = [...this.messages, youMsg].slice(-80);
+    this.emit();
+
+    try {
+      const res = await fetch(`${base}/v1/see`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "X-Micheal-Token": this.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          image: imageDataUrl,
+          session: this.session,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        reply?: { text: string; speak?: boolean; lang?: string };
+        session?: SessionState;
+        error?: string;
+        sawImage?: boolean;
+      };
+      if (!res.ok || !data.ok || !data.reply?.text) {
+        throw new Error(data.error || `see ${res.status}`);
+      }
+      if (data.session) this.session = data.session;
+      const message: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "micheal",
+        text: data.reply.text,
+        at: Date.now(),
+        spoken: true,
+      };
+      this.messages = [...this.messages, message].slice(-80);
+      this.emit();
+      if (this.voiceEnabled) {
+        this.speaking = true;
+        this.status = "speaking";
+        this.emit();
+        await this.onSpeak(message.text);
+        this.speaking = false;
+      }
+      this.status = "online";
+      this.live = true;
+      this.emit();
+    } catch (err) {
+      const sys: ChatMessage = {
+        id: crypto.randomUUID(),
+        role: "system",
+        text: err instanceof Error ? err.message : "live view failed",
+        at: Date.now(),
+      };
+      this.messages = [...this.messages, sys].slice(-80);
+      this.status = "online";
+      this.emit();
+    }
   }
 
   /** Upload recorded audio to Germany STT (Whisper, auto fa/en). */

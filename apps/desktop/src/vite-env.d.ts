@@ -3,7 +3,9 @@
 interface MichealDesktopBridge {
   readonly platform: string;
   readonly isElectron: true;
-  /** Returns JPEG base64 (no data: prefix) or null */
+  /** Prefer TradingView window — { id, name } for live desktop stream */
+  pickCaptureSource?: () => Promise<{ id: string; name: string } | null>;
+  /** Fallback still JPEG base64 (no data: prefix) */
   captureScreen?: () => Promise<string | null>;
 }
 

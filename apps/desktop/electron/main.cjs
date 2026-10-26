@@ -125,27 +125,42 @@ function createTray() {
   tray.on("double-click", () => showWindow());
 }
 
+function scoreSource(s) {
+  const n = `${s.name || ""}`.toLowerCase();
+  if (/tradingview|trading view/.test(n)) return 200;
+  if (/xauusd|gold|chart/.test(n)) return 120;
+  if (/chrome|edge|brave|firefox|opera/.test(n)) return 70;
+  if (String(s.id).startsWith("screen:")) return 30;
+  return 10;
+}
+
+async function bestSources() {
+  const sources = await desktopCapturer.getSources({
+    types: ["window", "screen"],
+    thumbnailSize: { width: 1600, height: 900 },
+    fetchWindowIcons: false,
+  });
+  return [...sources].sort((a, b) => scoreSource(b) - scoreSource(a));
+}
+
+ipcMain.handle("micheal:pick-source", async () => {
+  try {
+    const sources = await bestSources();
+    const best = sources[0];
+    if (!best) return null;
+    return { id: best.id, name: best.name || "screen" };
+  } catch (err) {
+    console.error("[micheal] pick-source failed", err);
+    return null;
+  }
+});
+
 ipcMain.handle("micheal:capture-screen", async () => {
   try {
-    const sources = await desktopCapturer.getSources({
-      types: ["window", "screen"],
-      thumbnailSize: { width: 1600, height: 900 },
-      fetchWindowIcons: false,
-    });
-    if (!sources.length) return null;
-
-    const score = (s) => {
-      const n = `${s.name || ""}`.toLowerCase();
-      if (/tradingview|trading view|xauusd|chart/.test(n)) return 100;
-      if (/chrome|edge|brave|firefox|opera/.test(n)) return 60;
-      if (s.id.startsWith("screen:")) return 40;
-      return 10;
-    };
-    sources.sort((a, b) => score(b) - score(a));
+    const sources = await bestSources();
     const best = sources[0];
     if (!best?.thumbnail || best.thumbnail.isEmpty()) return null;
-    // JPEG data URL — smaller than PNG for vision API
-    return best.thumbnail.toJPEG(72).toString("base64");
+    return best.thumbnail.toJPEG(70).toString("base64");
   } catch (err) {
     console.error("[micheal] capture failed", err);
     return null;

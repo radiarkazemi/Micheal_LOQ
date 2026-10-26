@@ -224,6 +224,59 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "POST" && url.pathname === "/v1/see") {
+    try {
+      if (tokenFromReq(req) !== config.token) {
+        json(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const raw = await readBody(req);
+      const body = JSON.parse(raw || "{}") as {
+        text?: string;
+        image?: string;
+        session?: Parameters<TradingSession["patch"]>[0];
+      };
+      const image = body.image?.trim() || "";
+      const text = (body.text || "").trim();
+      if (!image || image.length < 200) {
+        json(res, 400, {
+          error:
+            "live frame missing — enable Screen recording for Micheal and keep TradingView open",
+          sawImage: false,
+        });
+        return;
+      }
+      const session = new TradingSession(body.session);
+      const lang = detectLang(text);
+      session.setLang(lang === "en" ? "en" : "fa");
+      const patch = extractSessionPatch(text);
+      if (patch) session.patch(patch);
+      const memory = new DialogueMemory();
+      const reply = await think({
+        config,
+        session: session.snapshot(),
+        recent: [],
+        utterance:
+          text ||
+          (lang === "fa"
+            ? "این نمای زنده صفحه/چارت من است — دقیق بگو الان چی می‌بینی."
+            : "This is my live screen/chart feed — tell me exactly what you see right now."),
+        preferredLang: lang === "en" ? "en" : "fa",
+        memory,
+        image,
+      });
+      json(res, 200, {
+        ok: true,
+        sawImage: true,
+        reply,
+        session: session.snapshot(),
+      });
+    } catch (err) {
+      json(res, 400, { error: err instanceof Error ? err.message : "see failed", sawImage: false });
+    }
+    return;
+  }
+
   if (req.method === "POST" && url.pathname === "/v1/stt") {
     try {
       if (tokenFromReq(req) !== config.token) {
@@ -320,8 +373,8 @@ a{color:#4fd6c4;font-size:1.15rem} .box{max-width:640px;margin:auto;background:#
 small{color:#9aa8c0}</style>
 <div class="box"><h1>نصب Micheal روی ویندوز</h1>
 <p>اگر ویندوز لینک مستقیم سرور را بلاک کرد، از <b>GitHub (HTTPS)</b> دانلود کن:</p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.4-vision/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
-<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.4-vision/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.5-live-eyes/Micheal-Windows.zip">دانلود ZIP (پیشنهادی)</a></p>
+<p><a href="https://github.com/radiarkazemi/Micheal_LOQ/releases/download/v0.1.5-live-eyes/Micheal-Setup.exe">دانلود Setup.exe از GitHub</a></p>
 <p><a href="/download/Micheal-Windows.zip">ZIP از همین سرور</a> · <a href="/download/Micheal-Setup.exe">EXE از همین سرور</a></p>
 <small>اگر SmartScreen آمد: More info → Run anyway. میکروفون را Allow کن.</small>
 </div>`;

@@ -4,7 +4,7 @@ import { MichealCloud } from "@/cloud";
 import { loadConfig } from "@/config";
 import { createVoice } from "@/voice";
 import { WakeGate } from "@/wake";
-import { captureForMicheal, wantsVision } from "@/vision";
+import { captureForMicheal, isLiveEyesOn, liveSourceLabel, startLiveEyes, wantsVision } from "@/vision";
 import "./styles.css";
 
 const TIMEFRAMES = ["1", "5", "15", "60", "240", "D"] as const;
@@ -43,6 +43,8 @@ export function App() {
   const [earsOn, setEarsOn] = useState(false);
   const [level, setLevel] = useState(0);
   const [phase, setPhase] = useState<"boot" | "listening" | "thinking" | "speaking" | "sleep">("boot");
+  const [liveView, setLiveView] = useState(false);
+  const [liveLabel, setLiveLabel] = useState("");
   const busyRef = useRef(false);
   const speakingRef = useRef(false);
   const cloudRef = useRef<MichealCloud | null>(null);
@@ -140,9 +142,24 @@ export function App() {
               const cmd = gate.command || text;
               let image: string | undefined;
               if (wantsVision(cmd)) {
-                setMicMsg("دارم چارت/صفحه را می‌بینم…");
+                setMicMsg("LIVE VIEW — دارم چارت را زنده می‌بینم…");
+                if (!isLiveEyesOn()) {
+                  const eyes = await startLiveEyes();
+                  setLiveView(eyes.ok);
+                  setLiveLabel(eyes.source || "");
+                  if (!eyes.ok) {
+                    setMicMsg(eyes.error || "Live view failed");
+                    return;
+                  }
+                }
                 image = (await captureForMicheal()) ?? undefined;
-                setMicMsg(image ? null : "اسکرین گرفته نشد — Screen permission را چک کن.");
+                if (!image) {
+                  setMicMsg("فریم زنده نگرفتم — TradingView را باز بگذار و Screen recording را برای Micheal روشن کن.");
+                  return;
+                }
+                setMicMsg(null);
+                setLiveView(true);
+                setLiveLabel(liveSourceLabel());
               }
               cloud.chat(cmd, image);
             } catch (err) {
@@ -219,23 +236,35 @@ export function App() {
             ? "STANDBY"
             : "OFFLINE";
 
+  const ensureLiveEyes = async (): Promise<boolean> => {
+    const eyes = await startLiveEyes();
+    setLiveView(eyes.ok);
+    setLiveLabel(eyes.source || "");
+    if (!eyes.ok) {
+      setMicMsg(
+        eyes.error ||
+          "Live view off — Windows Settings → Privacy → Screen recording → allow Micheal. Keep Chrome/TradingView open.",
+      );
+    }
+    return eyes.ok;
+  };
+
   const sendWithOptionalVision = async (text: string) => {
     if (!cloud) return;
     wake.keepAlive();
     let image: string | undefined;
     if (wantsVision(text)) {
       setPhase("thinking");
-      setMicMsg("دارم صفحه‌ات / TradingView را می‌بینم…");
-      try {
-        image = (await captureForMicheal()) ?? undefined;
-        if (!image) {
-          setMicMsg("نتونستم صفحه را بگیرم — در ویندوز به Micheal اجازه Screen بده، یا TradingView را جلو بیاور.");
-        } else {
-          setMicMsg(null);
-        }
-      } catch {
-        setMicMsg("دسترسی به صفحه رد شد.");
+      setMicMsg("LIVE VIEW…");
+      const ok = await ensureLiveEyes();
+      if (!ok) return;
+      image = (await captureForMicheal()) ?? undefined;
+      if (!image) {
+        setMicMsg("فریم زنده خالی بود — TradingView را جلو بیاور و دوباره Look بزن.");
+        return;
       }
+      setMicMsg(null);
+      setLiveLabel(liveSourceLabel());
     }
     cloud.chat(text, image);
   };
@@ -310,6 +339,9 @@ export function App() {
             </span>
             <span>
               board <b>{boardReady ? `${session!.symbol}/${session!.timeframe}` : "—"}</b>
+            </span>
+            <span className={liveView ? "live" : ""}>
+              eyes <b>{liveView ? `LIVE · ${(liveLabel || "feed").slice(0, 28)}` : "OFF"}</b>
             </span>
           </div>
 
@@ -433,17 +465,23 @@ export function App() {
             </button>
             <button
               type="button"
+              className={liveView ? "on" : ""}
               onClick={() => {
-                void sendWithOptionalVision(
-                  "Look at my TradingView / screen now and tell me exactly what you see on the chart.",
-                );
+                void (async () => {
+                  const ok = await ensureLiveEyes();
+                  if (ok) {
+                    await sendWithOptionalVision(
+                      "Live view my TradingView chart now — tell me exactly what is on screen.",
+                    );
+                  }
+                })();
               }}
             >
-              Look
+              {liveView ? "Live eyes" : "Start live"}
             </button>
           </div>
           <p className="hint">
-            محمد × مایکل · هی مایکل · ببین چارت / Look · GPT · Germany
+            محمد × مایکل · live TradingView feed (not file upload) · Screen recording must be allowed
           </p>
         </aside>
       </div>
